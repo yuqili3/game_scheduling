@@ -1,4 +1,4 @@
-"""数据模型: 纯数据结构,不含任何 IO / 时钟 / 随机数。"""
+"""Data models: pure data structures, no IO / clock / global randomness."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -7,15 +7,15 @@ from typing import Dict, List, Optional
 
 @dataclass(frozen=True)
 class Player:
-    序号: int
-    姓名: str
-    性别: str  # "男" / "女"
-    是否队长: bool = False
+    id: int
+    name: str
+    gender: str  # "M" / "F"
+    is_captain: bool = False
 
 
 @dataclass(frozen=True)
 class Event:
-    """事件日志的一行。所有状态都是事件重放的结果。"""
+    """One line of the event log. All state is the result of replaying events."""
 
     seq: int
     ts: str
@@ -49,7 +49,7 @@ class Event:
 @dataclass
 class TournamentState:
     players: Dict[int, Player] = field(default_factory=dict)
-    # 队伍编号 -> 成员序号列表,约定队长恒在首位
+    # team id -> member ids, captain always first
     teams: Dict[int, List[int]] = field(default_factory=dict)
     changelog: List[str] = field(default_factory=list)
 
@@ -59,22 +59,24 @@ class TournamentState:
                 return tid
         return None
 
-    def validate(self, 每队女生数: int = 2, 每队男生数: int = 6) -> None:
-        """校验每队结构: 1 队长 + (每队男生数) 男(含队长) + 每队女生数 女,且无人跨队。"""
+    def validate(self, females_per_team: int = 2, males_per_team: int = 6) -> None:
+        """Each team: exactly 1 captain, males_per_team males (captain included),
+        females_per_team females; nobody on two teams."""
         seen: List[int] = []
         for tid, members in self.teams.items():
             ps = [self.players[m] for m in members]
-            captains = [p for p in ps if p.是否队长]
-            males = [p for p in ps if p.性别 == "男"]
-            females = [p for p in ps if p.性别 == "女"]
+            captains = [p for p in ps if p.is_captain]
+            males = [p for p in ps if p.gender == "M"]
+            females = [p for p in ps if p.gender == "F"]
             if len(captains) != 1:
-                raise ValueError(f"队伍{tid}队长数={len(captains)},应为1")
-            if len(males) != 每队男生数 or len(females) != 每队女生数:
+                raise ValueError(f"team {tid} has {len(captains)} captains, expected 1")
+            if len(males) != males_per_team or len(females) != females_per_team:
                 raise ValueError(
-                    f"队伍{tid}结构异常: 男{len(males)}/{每队男生数} 女{len(females)}/{每队女生数}"
+                    f"team {tid} malformed: {len(males)}/{males_per_team} males, "
+                    f"{len(females)}/{females_per_team} females"
                 )
-            if not self.players[members[0]].是否队长:
-                raise ValueError(f"队伍{tid}首位成员不是队长")
+            if not self.players[members[0]].is_captain:
+                raise ValueError(f"team {tid} first member is not the captain")
             seen += members
         if len(seen) != len(set(seen)):
-            raise ValueError("有人同时出现在两支队伍")
+            raise ValueError("some player appears on two teams")

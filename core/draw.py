@@ -1,4 +1,5 @@
-"""抽签逻辑: 全部纯函数。随机性只来自调用方传入的 seed,同 seed 结果必然一致。"""
+"""Draw logic: pure functions. Randomness comes only from the caller-supplied
+seed, so identical seeds always produce identical results."""
 from __future__ import annotations
 
 import random
@@ -7,111 +8,116 @@ from typing import Dict, List, Optional, Tuple
 from .models import Player, TournamentState
 
 
-def draw_teams(players: Dict[int, Player], 队伍数量: int, seed: int) -> Dict[int, List[int]]:
-    """初始抽签分队。
+def draw_teams(players: Dict[int, Player], num_teams: int, seed: int) -> Dict[int, List[int]]:
+    """Initial team draw.
 
-    队长、女生、男生三个池分别洗牌后依次切分入队,保证每队恰好
-    1 队长 + N 女 + M 普通男。输入池先排序再洗牌,确保与 dict 顺序无关。
+    Captains, females and non-captain males are shuffled as three separate
+    pools and dealt into teams, guaranteeing each team gets exactly
+    1 captain + N females + M regular males. Pools are sorted before
+    shuffling so the result is independent of dict ordering.
     """
     rng = random.Random(seed)
-    captains = sorted(p.序号 for p in players.values() if p.是否队长)
-    females = sorted(p.序号 for p in players.values() if p.性别 == "女")
-    males = sorted(
-        p.序号 for p in players.values() if p.性别 == "男" and not p.是否队长
-    )
-    if len(captains) != 队伍数量:
-        raise ValueError(f"队长数{len(captains)} != 队伍数量{队伍数量}")
-    女每队 = len(females) // 队伍数量
-    男每队 = len(males) // 队伍数量
+    captains = sorted(p.id for p in players.values() if p.is_captain)
+    females = sorted(p.id for p in players.values() if p.gender == "F")
+    males = sorted(p.id for p in players.values() if p.gender == "M" and not p.is_captain)
+    if len(captains) != num_teams:
+        raise ValueError(f"{len(captains)} captains != {num_teams} teams")
+    f_per = len(females) // num_teams
+    m_per = len(males) // num_teams
     rng.shuffle(captains)
     rng.shuffle(females)
     rng.shuffle(males)
     teams: Dict[int, List[int]] = {}
-    for i in range(队伍数量):
+    for i in range(num_teams):
         teams[i + 1] = (
             [captains[i]]
-            + females[女每队 * i : 女每队 * (i + 1)]
-            + males[男每队 * i : 男每队 * (i + 1)]
+            + females[f_per * i : f_per * (i + 1)]
+            + males[m_per * i : m_per * (i + 1)]
         )
     return teams
 
 
 def withdraw_redraw(
     state: TournamentState,
-    退赛者序号: int,
-    候补姓名: str,
+    withdrawn_id: int,
+    substitute_name: str,
     seed: int,
-    新队长序号: Optional[int] = None,
+    new_captain_id: Optional[int] = None,
 ) -> Tuple[Dict[int, Player], Dict[int, List[int]], List[str]]:
-    """赛前退赛重抽(PDF 规则)。
+    """Pre-event withdrawal redraw (tournament rules).
 
-    1. 若退赛者是队长,先由指定的新队长接任(必须是本队非队长男队员);
-    2. 从其余 7 支完整队伍各随机抽 1 名与退赛者同性别的非队长成员;
-    3. 该 7 人 + 候补(编为新序号)共 8 人重新洗牌,分入 8 支队伍的空缺;
-    4. 结构不变: 每队 1 队长 + 5 普通男 + 2 女。
+    1. If the withdrawn player is a captain, the designated successor
+       (a non-captain male on the same team) takes over first;
+    2. each of the other 7 full teams randomly gives up one non-captain
+       member of the same gender as the withdrawn player;
+    3. those 7 + the substitute (assigned a fresh id) are reshuffled into
+       the 8 vacancies;
+    4. team structure is unchanged: 1 captain + 5 regular males + 2 females.
 
-    返回 (新 players, 新 teams, 变更日志)。不修改传入的 state。
+    Returns (new players, new teams, change log). Does not mutate `state`.
     """
     rng = random.Random(seed)
     players = dict(state.players)
     teams = {tid: list(m) for tid, m in state.teams.items()}
-    if 退赛者序号 not in players:
-        raise ValueError(f"退赛者 #{退赛者序号} 不存在")
-    quitter = players[退赛者序号]
-    home_tid = state.team_of(退赛者序号)
+    if withdrawn_id not in players:
+        raise ValueError(f"withdrawn player #{withdrawn_id} does not exist")
+    quitter = players[withdrawn_id]
+    home_tid = state.team_of(withdrawn_id)
     if home_tid is None:
-        raise ValueError(f"退赛者 #{退赛者序号} 不在任何队伍中")
+        raise ValueError(f"withdrawn player #{withdrawn_id} is not on any team")
     log: List[str] = []
 
-    if quitter.是否队长:
-        if 新队长序号 is None:
-            raise ValueError("队长退赛必须指定新队长序号")
-        successor = players.get(新队长序号)
+    if quitter.is_captain:
+        if new_captain_id is None:
+            raise ValueError("captain withdrawal requires a successor (new_captain_id)")
+        successor = players.get(new_captain_id)
         if (
             successor is None
-            or state.team_of(新队长序号) != home_tid
-            or successor.是否队长
-            or successor.性别 != "男"
+            or state.team_of(new_captain_id) != home_tid
+            or successor.is_captain
+            or successor.gender != "M"
         ):
-            raise ValueError("新队长必须是本队非队长男队员")
-        players[新队长序号] = Player(successor.序号, successor.姓名, successor.性别, True)
-        teams[home_tid].remove(新队长序号)
-        teams[home_tid].insert(0, 新队长序号)
-        # 原队长退赛后按普通队员处理空缺
-        players[退赛者序号] = Player(quitter.序号, quitter.姓名, quitter.性别, False)
-        quitter = players[退赛者序号]
-        log.append(f"队长 {players[新队长序号].姓名}(#{新队长序号}) 接任队伍{home_tid}队长")
+            raise ValueError("successor must be a non-captain male on the same team")
+        players[new_captain_id] = Player(successor.id, successor.name, successor.gender, True)
+        teams[home_tid].remove(new_captain_id)
+        teams[home_tid].insert(0, new_captain_id)
+        # the outgoing captain is then handled like a regular member
+        players[withdrawn_id] = Player(quitter.id, quitter.name, quitter.gender, False)
+        quitter = players[withdrawn_id]
+        log.append(
+            f"{players[new_captain_id].name}(#{new_captain_id}) takes over as captain of team {home_tid}"
+        )
 
-    gender = quitter.性别
-    teams[home_tid].remove(退赛者序号)
-    players.pop(退赛者序号)
-    log.append(f"{quitter.姓名}(#{退赛者序号}, {gender}) 退出队伍{home_tid}")
+    gender = quitter.gender
+    teams[home_tid].remove(withdrawn_id)
+    players.pop(withdrawn_id)
+    log.append(f"{quitter.name}(#{withdrawn_id}, {gender}) withdrew from team {home_tid}")
 
-    # 其余 7 队各随机抽 1 名同性别非队长成员入池
+    # each of the other 7 teams gives up one same-gender non-captain member
     pool: List[int] = []
     for tid in sorted(teams):
         if tid == home_tid:
             continue
         cands = sorted(
-            m for m in teams[tid] if players[m].性别 == gender and not players[m].是否队长
+            m for m in teams[tid] if players[m].gender == gender and not players[m].is_captain
         )
         if not cands:
-            raise ValueError(f"队伍{tid}没有可抽取的{gender}性非队长成员")
+            raise ValueError(f"team {tid} has no drawable {gender} non-captain member")
         picked = rng.choice(cands)
         teams[tid].remove(picked)
         pool.append(picked)
-        log.append(f"队伍{tid} 抽出 {players[picked].姓名}(#{picked}) 参与重抽")
+        log.append(f"team {tid} gives up {players[picked].name}(#{picked}) for redraw")
 
-    # 候补编入新序号
+    # substitute joins with a fresh id
     sub_id = max(players) + 1
-    players[sub_id] = Player(sub_id, 候补姓名, gender, False)
+    players[sub_id] = Player(sub_id, substitute_name, gender, False)
     pool.append(sub_id)
-    log.append(f"候补 {候补姓名} 编为 #{sub_id} 入池")
+    log.append(f"substitute {substitute_name} registered as #{sub_id}")
 
-    # 8 人重新洗牌,按队伍编号顺序分入空缺
+    # reshuffle the 8 into the vacancies, one per team in team-id order
     rng.shuffle(pool)
     for tid, pid in zip(sorted(teams), pool):
         teams[tid].append(pid)
-        log.append(f"{players[pid].姓名}(#{pid}) 抽入队伍{tid}")
+        log.append(f"{players[pid].name}(#{pid}) drawn into team {tid}")
 
     return players, teams, log

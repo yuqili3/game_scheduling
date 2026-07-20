@@ -1,62 +1,63 @@
-赛事:
-  名称: 2026大乱斗
-  比赛日期: 2026-07-19
+event:
+  name: "2026 Badminton Melee"
+  date: "2026-07-19"
 
-人员:
-  女队员数量: 16        # 编号 1-16
-  男队员数量: 48        # 编号 17-64(17-24 为队长)
-  队伍数量: 8
-  每队女生数: 2
-  每队男生数: 6          # 含队长
-  队长性别: 男
+players:
+  num_female: 16          # ids 1-16
+  num_male: 48            # ids 17-64 (17-24 are captains)
+  num_teams: 8
+  females_per_team: 2
+  males_per_team: 6       # including captain
+  captain_gender: M
 
-赛制:
-  总轮数: 3
-  每轮场次: 5            # 女双1 + 男双3 + 盲抽1
-  获胜所需场次: 3        # 5场3胜
-  每局分数: 21
-  缺人队伍分数: 15       # 比赛日缺人的队伍,其所有对局改用的分制
-  每场局数: 3            # 三局两胜
-  盲抽局类型: [混双, 混双, 男双]   # 按轮次
+format:
+  num_rounds: 3
+  matches_per_round: 5    # WD x1 + MD x3 + blind x1
+  matches_to_win: 3       # best of 5 matches
+  points_per_game: 21
+  shorthanded_points: 15  # a short-handed team plays all its matches at this scoring
+  games_per_match: 3      # best of 3 games
+  blind_match_types: [XD, XD, MD]   # by round
 
-场地:
-  场地总数: 10
-  每组场地数: 5          # 每 4 队一组,共 2 组并行
+courts:
+  total: 10
+  per_bank: 5             # each pair of matchups shares one bank of courts
 
-时长模型:                 # 单位: 分钟,均为 21 分制单局(1 game)预估
-  女双单局时长: 10
-  男双单局时长: 13
-  混双单局时长: 13
-  强强对话加时: 3         # 第一轮一律不加时
-  每局净胜阈值: 6         # 上一场平均每局净胜 ≥ 6 的组合视为"强"
-  每场净胜阈值: 12        # 或上一场全场累计净胜 ≥ 12 亦视为"强"
-  连续出场休息: 5         # 同一人连打两场之间的最短休息时间
-  换场间隔: 2
-  分制缩放: true          # 15分制时长 = 21分制时长 × 15/21,四舍五入
+duration:                 # minutes, per game at 21 points
+  wd_game_minutes: 10
+  md_game_minutes: 13
+  xd_game_minutes: 13
+  strong_pair_bonus: 3            # never applied in round 1
+  margin_per_game_threshold: 6    # avg winning margin per game >= 6 -> strong pair
+  margin_per_match_threshold: 12  # or total match margin >= 12 -> strong pair
+  rest_minutes: 5                 # min rest for a player between consecutive matches
+  changeover_minutes: 2
+  scale_by_points: true           # 15-point game time = base * 15/21
 
-可视化:
-  场地颜色:
-    空闲: "#4CAF50"      # 绿色
-    热身: "#FFC107"      # 黄色
-    第一局: "#FF8A80"    # 浅红色
-    第二局: "#D32F2F"    # 深红色
-    第三局: "#AD1457"    # 紫红色
+visual:
+  court_colors:
+    idle: "#4CAF50"       # green
+    warmup: "#FFC107"     # yellow
+    game1: "#FF8A80"      # light red
+    game2: "#D32F2F"      # dark red
+    game3: "#AD1457"      # purple red
 
-广播:
-  刷新间隔秒: 5           # 观众页自动刷新频率
-  志愿者:                 # 每人独立姓名/PIN/负责场地
-    - 姓名: 志愿者A
-      PIN: "1111"
-      负责场地: [1, 2, 3]
-    - 姓名: 志愿者B
-      PIN: "2222"
-      负责场地: [4, 5]
-    - 姓名: 志愿者C
-      PIN: "3333"
-      负责场地: [6, 7, 8]
-    - 姓名: 志愿者D
-      PIN: "4444"
-      负责场地: [9, 10]
+broadcast:
+  refresh_seconds: 5
+  session_start: "17:10"  # local time of first serve, used for display
+  volunteers:
+    - name: VolunteerA
+      pin: "1111"
+      courts: [1, 2, 3]
+    - name: VolunteerB
+      pin: "2222"
+      courts: [4, 5]
+    - name: VolunteerC
+      pin: "3333"
+      courts: [6, 7, 8]
+    - name: VolunteerD
+      pin: "4444"
+      courts: [9, 10]
 
-随机:
-  默认种子: 20260719
+random:
+  default_seed: 20260719

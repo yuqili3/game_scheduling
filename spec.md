@@ -63,68 +63,59 @@ Step 0 参数文件 → Step 2 初始人员表 → (抽签分队) → Step 3 退
 
 ### Step 0. 参数文件(config.yaml)
 
-用 **YAML**(UTF-8,原生支持中文键名与注释)。所有超参数集中于此,程序不得硬编码:
+用 **YAML**,键名与取值一律英文,注释可用中文。所有超参数集中于此,程序不得硬编码:
 
 ```yaml
-赛事:
-  名称: 2026大乱斗
-  比赛日期: 2026-07-19
+players:
+  num_female: 16          # 编号 1-16
+  num_male: 48            # 编号 17-64(17-24 为队长)
+  num_teams: 8
+  females_per_team: 2
+  males_per_team: 6       # 含队长
 
-人员:
-  女队员数量: 16        # 编号 1-16
-  男队员数量: 48        # 编号 17-64
-  队伍数量: 8
-  每队女生数: 2
-  每队男生数: 6          # 含队长
-  队长性别: 男
+format:
+  num_rounds: 3
+  matches_per_round: 5    # 女双1 + 男双3 + 盲抽1
+  matches_to_win: 3       # 5场3胜
+  points_per_game: 21
+  shorthanded_points: 15  # 缺人队伍全部对局改用的分制
+  games_per_match: 3      # 三局两胜
+  blind_match_types: [XD, XD, MD]   # 按轮次: 混双/混双/男双
 
-赛制:
-  总轮数: 3
-  每轮场次: 5            # 女双1 + 男双3 + 盲抽1
-  获胜所需场次: 3        # 5场3胜
-  每局分数: 21
-  缺人队伍分数: 15       # 比赛日缺人的队伍,其所有对局改用的分制
-  每场局数: 3            # 三局两胜
-  盲抽局类型: [混双, 混双, 男双]   # 按轮次
+courts:
+  total: 10
+  per_bank: 5             # 每 4 队一组共用一个半区
 
-场地:
-  场地总数: 10
-  每组场地数: 5          # 每 4 队一组,共 2 组并行
+duration:                 # 分钟,21 分制单局预估
+  wd_game_minutes: 10
+  md_game_minutes: 13
+  xd_game_minutes: 13
+  strong_pair_bonus: 3            # 第一轮一律不加时
+  margin_per_game_threshold: 6    # 平均每局净胜 ≥ 6 视为"强"
+  margin_per_match_threshold: 12  # 或全场净胜 ≥ 12 视为"强"
+  rest_minutes: 5                 # 连打两场之间最短休息
+  changeover_minutes: 2
+  scale_by_points: true           # 15分制时长 = 21分制 × 15/21
 
-时长模型:                 # 单位: 分钟,均为 21 分制单局(1 game)预估
-  女双单局时长: 10
-  男双单局时长: 13
-  混双单局时长: 13
-  强强对话加时: 3         # 判定见 Step 4,第一轮一律不加时
-  每局净胜阈值: 6         # 上一场平均每局净胜 ≥ 6 的组合视为"强"
-  每场净胜阈值: 12        # 或上一场全场累计净胜 ≥ 12 亦视为"强"
-  连续出场休息: 5         # 同一人连打两场之间的最短休息时间
-  换场间隔: 2
-  分制缩放: true          # 15分制时长 = 21分制时长 × 15/21,四舍五入
+visual:
+  court_colors:                   # 空闲绿/热身黄/三局红色系
+    idle: "#4CAF50"
+    warmup: "#FFC107"
+    game1: "#FF8A80"
+    game2: "#D32F2F"
+    game3: "#AD1457"
 
-可视化:
-  场地颜色:
-    空闲: 绿色
-    热身: 黄色
-    第一局: 浅红色
-    第二局: 深红色
-    第三局: 紫红色
+broadcast:
+  refresh_seconds: 5
+  session_start: "17:10"
+  volunteers:                     # 每人独立姓名/PIN/负责场地
+    - {name: VolunteerA, pin: "1111", courts: [1, 2, 3]}
+    - {name: VolunteerB, pin: "2222", courts: [4, 5]}
+    - {name: VolunteerC, pin: "3333", courts: [6, 7, 8]}
+    - {name: VolunteerD, pin: "4444", courts: [9, 10]}
 
-广播:
-  刷新间隔秒: 5           # 观众页自动刷新频率
-  志愿者:                 # 每人独立姓名/PIN/负责场地
-    - 姓名: 志愿者A
-      PIN: "1111"
-      负责场地: [1, 2, 3]
-    - 姓名: 志愿者B
-      PIN: "2222"
-      负责场地: [4, 5]
-    - 姓名: 志愿者C
-      PIN: "3333"
-      负责场地: [6, 7, 8]
-    - 姓名: 志愿者D
-      PIN: "4444"
-      负责场地: [9, 10]
+random:
+  default_seed: 20260719
 ```
 
 ### Step 1. 时间线与事件流
@@ -211,8 +202,8 @@ Step 0 参数文件 → Step 2 初始人员表 → (抽签分队) → Step 3 退
 事件日志 `events.jsonl` 每行一个 JSON 事件,统一结构:
 
 ```json
-{"seq": 42, "ts": "2026-07-19T17:23:05", "type": "局结束", "actor": "志愿者A",
- "payload": {"轮次": 1, "对阵": "G1vG2", "场次": "男双1", "局号": 2, "比分": [21, 15]},
+{"seq": 42, "ts": "2026-07-19T17:23:05", "type": "game_finished", "actor": "VolunteerA",
+ "payload": {"node": "R1-1", "slot": "MD1", "game": 2, "score": [21, 15]},
  "seed": null}
 ```
 
@@ -220,8 +211,8 @@ Step 0 参数文件 → Step 2 初始人员表 → (抽签分队) → Step 3 退
 
 | 阶段 | 事件类型 | 是否带种子 |
 |------|---------|-----------|
-| 赛前 | 报名确认、初始抽签分队、退赛、候补录入、重抽 | 抽签/重抽必带 |
-| 比赛日 | 对阵抽签、名单提交、盲抽结果、局开始、局结束、缺席登记、顶替指定 | 盲抽带 |
+| 赛前 | initial_draw / assign_teams / withdraw_redraw | 抽签/重抽必带 |
+| 比赛日 | group_draw / lineup_submit / blind_draw_result / game_finished / absence_registered / substitute_assigned | 盲抽带 |
 | 修正 | 撤销/更正(指向某 seq 的补偿事件) | 否 |
 
 **为什么这样保证可复现**:
@@ -308,3 +299,4 @@ game_scheduling/
 | 比赛日缺人 | 每轮队长指定一名队员顶替(三轮顶替者不能重复);该队所有比赛改 15 分制 |
 | 场地可视化 | 绿=空闲、黄=热身、浅红/深红/紫红=第1/2/3局;另有三轮胜败走向 bracket 图 |
 | 蒙特卡洛模拟 | 不需要 |
+| 语言约束 | 代码/配置/数据文件零中文(标识符、键名、事件类型、取值全英文);中文只出现在 spec 与 README |

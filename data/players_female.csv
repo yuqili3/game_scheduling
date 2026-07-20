@@ -1,17 +1,17 @@
-序号,姓名,性别,是否队长
-1,Le Yang,女,false
-2,Liwei Qing,女,false
-3,Jiahang Li,女,false
-4,Angela Chen,女,false
-5,Annie Yu,女,false
-6,Yupei Zhang,女,false
-7,Min Zhu,女,false
-8,Xi Chen,女,false
-9,Yihang Guo,女,false
-10,Heidi Chen,女,false
-11,Qinhui Xu,女,false
-12,Joyce Wang,女,false
-13,Maji Li,女,false
-14,Iris Liu,女,false
-15,Yixuan Wang,女,false
-16,Christie Taing,女,false
+id,name,gender,is_captain
+1,Le Yang,F,false
+2,Liwei Qing,F,false
+3,Jiahang Li,F,false
+4,Angela Chen,F,false
+5,Annie Yu,F,false
+6,Yupei Zhang,F,false
+7,Min Zhu,F,false
+8,Xi Chen,F,false
+9,Yihang Guo,F,false
+10,Heidi Chen,F,false
+11,Qinhui Xu,F,false
+12,Joyce Wang,F,false
+13,Maji Li,F,false
+14,Iris Liu,F,false
+15,Yixuan Wang,F,false
+16,Christie Taing,F,false

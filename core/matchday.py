@@ -1,7 +1,10 @@
-"""比赛日状态: 由事件重放构建。纯函数(除 dataclass 可变容器外无副作用)。
+"""Match-day state, built by replaying match-day events. Pure apart from the
+mutable dataclass containers.
 
-处理事件类型: 对阵抽签 / 名单提交 / 盲抽结果 / 局结束 / 缺席登记 / 顶替指定。
-赛前事件(初始抽签/指定分队/退赛重抽)由 core.replay 处理,此模块跳过。
+Handled event types: group_draw / lineup_submit / blind_draw_result /
+game_finished / absence_registered / substitute_assigned.
+Pre-match events (initial_draw / assign_teams / withdraw_redraw) are handled
+by core.replay and skipped here.
 """
 from __future__ import annotations
 
@@ -10,38 +13,37 @@ from typing import Dict, List, Optional, Tuple
 
 from . import rules
 from .models import Event, TournamentState
-
-PRE_MATCH_EVENTS = ("初始抽签", "指定分队", "退赛重抽")
+from .replay import PRE_MATCH_EVENTS
 
 
 @dataclass
 class Match:
-    场次: str  # 女双/男双1/男双2/男双3/盲抽
-    类别: str  # 女双/男双/混双
-    a: List[int] = field(default_factory=list)  # a 侧选手序号
+    slot: str  # WD / MD1 / MD2 / MD3 / BLIND
+    category: str  # WD / MD / XD
+    a: List[int] = field(default_factory=list)  # player ids, side a
     b: List[int] = field(default_factory=list)
-    局分: List[Tuple[int, int]] = field(default_factory=list)
+    games: List[Tuple[int, int]] = field(default_factory=list)
 
-    def 胜方(self, 需胜局: int = 2) -> Optional[str]:
-        return rules.match_winner(self.局分, 需胜局)
+    def winner(self, games_to_win: int = 2) -> Optional[str]:
+        return rules.match_winner(self.games, games_to_win)
 
 
 @dataclass
 class MatchDayState:
-    base: TournamentState  # 赛前重放结果(最终队伍名单)
+    base: TournamentState  # pre-match replay result (final rosters)
     cfg: dict
-    group_of: Dict[str, int] = field(default_factory=dict)  # "G1" -> 队伍编号
+    group_of: Dict[str, int] = field(default_factory=dict)  # "G1" -> team id
     nodes: Dict[str, rules.Node] = field(default_factory=rules.bracket)
-    # (node_id, 场次) -> Match
+    # (node_id, slot) -> Match
     matches: Dict[Tuple[str, str], Match] = field(default_factory=dict)
-    # 缺人登记: 队伍编号 -> {"缺席者": pid, "顶替": {轮次: pid}}
-    缺人: Dict[int, dict] = field(default_factory=dict)
+    # short-handed teams: team id -> {"absent_id": pid, "substitutes": {round: pid}}
+    shorthanded: Dict[int, dict] = field(default_factory=dict)
     changelog: List[str] = field(default_factory=list)
 
-    # ---------- 查询 ----------
+    # ---------- queries ----------
 
     def node_groups(self, node_id: str) -> Optional[Tuple[str, str]]:
-        """节点两侧的 G 编号;上游未决出返回 None。"""
+        """G labels of both sides; None while upstream is undecided."""
         return rules.resolve_groups(self.nodes[node_id], self.node_winners(), self.nodes)
 
     def node_teams(self, node_id: str) -> Optional[Tuple[int, int]]:
@@ -51,19 +53,19 @@ class MatchDayState:
         return self.group_of[gs[0]], self.group_of[gs[1]]
 
     def node_winners(self) -> Dict[str, str]:
-        """已决出胜负的节点: node_id -> 胜方 G 编号。"""
+        """Decided nodes: node_id -> winning G label."""
         winners: Dict[str, str] = {}
-        需胜场 = self.cfg["赛制"]["获胜所需场次"]
-        # 按轮次顺序解析,保证上游先于下游
-        for nid in sorted(self.nodes, key=lambda i: self.nodes[i].轮次):
-            局分表 = {
-                场次: m.局分
-                for (n, 场次), m in self.matches.items()
-                if n == nid and m.局分
+        matches_to_win = self.cfg["format"]["matches_to_win"]
+        # resolve in round order so upstream results exist before downstream
+        for nid in sorted(self.nodes, key=lambda i: self.nodes[i].round):
+            games_by_slot = {
+                slot: m.games
+                for (n, slot), m in self.matches.items()
+                if n == nid and m.games
             }
-            if not 局分表:
+            if not games_by_slot:
                 continue
-            w = rules.matchup_winner(局分表, 需胜场)
+            w = rules.matchup_winner(games_by_slot, matches_to_win)
             if w is None:
                 continue
             gs = rules.resolve_groups(self.nodes[nid], winners, self.nodes)
@@ -72,205 +74,213 @@ class MatchDayState:
         return winners
 
     def node_finished(self, node_id: str) -> bool:
-        """5 场都决出即对抗结束(即便中途已锁定胜负也打满)。"""
+        """A matchup ends when all 5 matches are decided (all are played even
+        after the matchup itself is mathematically decided)."""
+        games_to_win = self.cfg["format"]["games_per_match"] // 2 + 1
         done = 0
-        for 场次 in rules.MATCH_SLOTS:
-            m = self.matches.get((node_id, 场次))
-            if m and m.胜方(self.cfg["赛制"]["每场局数"] // 2 + 1) is not None:
+        for slot in rules.MATCH_SLOTS:
+            m = self.matches.get((node_id, slot))
+            if m and m.winner(games_to_win) is not None:
                 done += 1
         return done == len(rules.MATCH_SLOTS)
 
-    def 分制(self, node_id: str) -> int:
-        """该对抗采用的每局分数: 任一侧队伍缺人则整场对抗用缺人分制。"""
+    def points_for(self, node_id: str) -> int:
+        """Points per game in this matchup: short-handed team on either side
+        switches the whole matchup to the short-handed scoring."""
         teams = self.node_teams(node_id)
-        if teams and any(t in self.缺人 for t in teams):
-            return self.cfg["赛制"]["缺人队伍分数"]
-        return self.cfg["赛制"]["每局分数"]
+        if teams and any(t in self.shorthanded for t in teams):
+            return self.cfg["format"]["shorthanded_points"]
+        return self.cfg["format"]["points_per_game"]
 
-    def player_round_results(self, pid: int, 轮次: int) -> List[dict]:
-        """某选手在某轮的全部对局: [{"胜": bool, "总净胜": int, "局数": int, "搭档": [...]}]"""
+    def player_round_results(self, pid: int, round_no: int) -> List[dict]:
+        """All decided matches of a player in a round:
+        [{"won": bool, "margin": int, "num_games": int, "partners": [...]}]"""
         out = []
-        for (nid, 场次), m in self.matches.items():
-            if self.nodes[nid].轮次 != 轮次 or not m.局分:
+        for (nid, slot), m in self.matches.items():
+            if self.nodes[nid].round != round_no or not m.games:
                 continue
             side = "a" if pid in m.a else ("b" if pid in m.b else None)
             if side is None:
                 continue
-            w = m.胜方()
+            w = m.winner()
             if w is None:
                 continue
             sign = 1 if side == "a" else -1
-            margin = sum(sign * (g[0] - g[1]) for g in m.局分)
+            margin = sum(sign * (g[0] - g[1]) for g in m.games)
             out.append(
                 {
-                    "胜": w == side,
-                    "总净胜": margin,
-                    "局数": len(m.局分),
-                    "搭档": list(m.a if side == "a" else m.b),
+                    "won": w == side,
+                    "margin": margin,
+                    "num_games": len(m.games),
+                    "partners": list(m.a if side == "a" else m.b),
                 }
             )
         return out
 
-    def pair_strong(self, pids: List[int], 轮次: int) -> bool:
-        """组合是否为"强"(用于强强对话加时判定)。第一轮一律不强。
+    def pair_strong(self, pids: List[int], round_no: int) -> bool:
+        """Whether a pair counts as "strong" for the overtime bonus.
+        Never strong in round 1.
 
-        (a) 两人上一轮各自的对局全部获胜;或
-        (b) 两人上一轮曾搭档且该场大比分获胜:
-            平均每局净胜 ≥ 每局净胜阈值,或总净胜 ≥ 每场净胜阈值。
+        (a) both players won every match they played in the previous round; or
+        (b) the two partnered in the previous round and won big:
+            avg margin per game >= margin_per_game_threshold, or
+            total match margin >= margin_per_match_threshold.
         """
-        if 轮次 <= 1 or len(pids) < 2:
+        if round_no <= 1 or len(pids) < 2:
             return False
-        prev = 轮次 - 1
-        t = self.cfg["时长模型"]
+        prev = round_no - 1
+        d = self.cfg["duration"]
         recs = {p: self.player_round_results(p, prev) for p in pids}
-        # (a) 全胜
-        if all(r and all(x["胜"] for x in r) for r in recs.values()):
+        # (a) clean sweep for both players
+        if all(r and all(x["won"] for x in r) for r in recs.values()):
             return True
-        # (b) 搭档大胜
+        # (b) partnered blowout win
         for r in recs[pids[0]]:
-            if set(pids) <= set(r["搭档"]) and r["胜"]:
+            if set(pids) <= set(r["partners"]) and r["won"]:
                 if (
-                    r["总净胜"] / max(r["局数"], 1) >= t["每局净胜阈值"]
-                    or r["总净胜"] >= t["每场净胜阈值"]
+                    r["margin"] / max(r["num_games"], 1) >= d["margin_per_game_threshold"]
+                    or r["margin"] >= d["margin_per_match_threshold"]
                 ):
                     return True
         return False
 
-    # ---------- 事件应用 ----------
+    # ---------- event application ----------
 
     def apply(self, ev: Event) -> None:
         handler = {
-            "对阵抽签": self._对阵抽签,
-            "名单提交": self._名单提交,
-            "盲抽结果": self._盲抽结果,
-            "局结束": self._局结束,
-            "缺席登记": self._缺席登记,
-            "顶替指定": self._顶替指定,
+            "group_draw": self._group_draw,
+            "lineup_submit": self._lineup_submit,
+            "blind_draw_result": self._blind_draw_result,
+            "game_finished": self._game_finished,
+            "absence_registered": self._absence_registered,
+            "substitute_assigned": self._substitute_assigned,
         }.get(ev.type)
         if handler is None:
-            raise ValueError(f"未知比赛日事件: {ev.type} (seq={ev.seq})")
+            raise ValueError(f"unknown match-day event: {ev.type} (seq={ev.seq})")
         handler(ev)
 
-    def _match(self, node_id: str, 场次: str) -> Match:
-        key = (node_id, 场次)
+    def _match(self, node_id: str, slot: str) -> Match:
+        key = (node_id, slot)
         if key not in self.matches:
-            if 场次 == "盲抽":
-                轮次 = self.nodes[node_id].轮次
-                类别 = self.cfg["赛制"]["盲抽局类型"][轮次 - 1]
+            if slot == "BLIND":
+                round_no = self.nodes[node_id].round
+                category = self.cfg["format"]["blind_match_types"][round_no - 1]
             else:
-                类别 = "女双" if 场次 == "女双" else "男双"
-            self.matches[key] = Match(场次=场次, 类别=类别)
+                category = "WD" if slot == "WD" else "MD"
+            self.matches[key] = Match(slot=slot, category=category)
         return self.matches[key]
 
     def _side_of_team(self, node_id: str, tid: int) -> str:
         teams = self.node_teams(node_id)
         if teams is None:
-            raise ValueError(f"{node_id} 双方队伍尚未确定")
+            raise ValueError(f"{node_id} sides are not determined yet")
         if tid == teams[0]:
             return "a"
         if tid == teams[1]:
             return "b"
-        raise ValueError(f"队伍{tid}不在 {node_id} 中")
+        raise ValueError(f"team {tid} is not part of {node_id}")
 
-    def _对阵抽签(self, ev: Event) -> None:
-        分组 = {g: int(t) for g, t in ev.payload["分组"].items()}
-        if sorted(分组) != [f"G{i}" for i in range(1, 9)] or sorted(
-            分组.values()
+    def _group_draw(self, ev: Event) -> None:
+        groups = {g: int(t) for g, t in ev.payload["groups"].items()}
+        if sorted(groups) != [f"G{i}" for i in range(1, 9)] or sorted(
+            groups.values()
         ) != sorted(self.base.teams):
-            raise ValueError("对阵抽签必须覆盖 G1-G8 与全部 8 支队伍")
-        self.group_of = 分组
-        self.changelog.append(f"[{ev.ts}] 对阵抽签: {分组}")
+            raise ValueError("group draw must cover G1-G8 and all 8 teams")
+        self.group_of = groups
+        self.changelog.append(f"[{ev.ts}] group draw: {groups}")
 
-    def _名单提交(self, ev: Event) -> None:
+    def _lineup_submit(self, ev: Event) -> None:
         p = ev.payload
-        node_id, tid = p["节点"], int(p["队伍"])
+        node_id, tid = p["node"], int(p["team"])
         side = self._side_of_team(node_id, tid)
-        for 场次, pids in p["名单"].items():
-            if 场次 == "盲抽":
-                raise ValueError("盲抽局人员须通过 盲抽结果 事件写入")
-            m = self._match(node_id, 场次)
+        for slot, pids in p["lineup"].items():
+            if slot == "BLIND":
+                raise ValueError("blind-match players must come from blind_draw_result events")
+            m = self._match(node_id, slot)
             setattr(m, side, [int(x) for x in pids])
         self._validate_lineup(node_id, tid, side)
-        self.changelog.append(f"[{ev.ts}] {node_id} 队伍{tid} 提交名单")
+        self.changelog.append(f"[{ev.ts}] {node_id} team {tid} lineup submitted")
 
     def _validate_lineup(self, node_id: str, tid: int, side: str) -> None:
-        """女双=2女;男双1-3 每人最多出战一次且为男性。"""
+        """WD = 2 females; MD1-3 all male, each man plays at most one MD."""
         males_used: List[int] = []
-        for 场次 in ("男双1", "男双2", "男双3"):
-            m = self.matches.get((node_id, 场次))
+        for slot in ("MD1", "MD2", "MD3"):
+            m = self.matches.get((node_id, slot))
             pids = getattr(m, side) if m else []
             males_used += pids
             for pid in pids:
-                if self.base.players[pid].性别 != "男":
-                    raise ValueError(f"{场次} 含非男性选手 #{pid}")
+                if self.base.players[pid].gender != "M":
+                    raise ValueError(f"{slot} contains non-male player #{pid}")
         if len(males_used) != len(set(males_used)):
-            raise ValueError(f"{node_id} 队伍{tid}: 有男生在三场男双中出战超过一次")
-        wd = self.matches.get((node_id, "女双"))
+            raise ValueError(f"{node_id} team {tid}: a man is fielded in more than one MD")
+        wd = self.matches.get((node_id, "WD"))
         for pid in getattr(wd, side) if wd else []:
-            if self.base.players[pid].性别 != "女":
-                raise ValueError(f"女双含非女性选手 #{pid}")
+            if self.base.players[pid].gender != "F":
+                raise ValueError(f"WD contains non-female player #{pid}")
 
-    def _盲抽结果(self, ev: Event) -> None:
+    def _blind_draw_result(self, ev: Event) -> None:
         p = ev.payload
-        node_id, tid = p["节点"], int(p["队伍"])
+        node_id, tid = p["node"], int(p["team"])
         side = self._side_of_team(node_id, tid)
-        m = self._match(node_id, "盲抽")
-        pids = [int(x) for x in p["队员"]]
+        m = self._match(node_id, "BLIND")
+        pids = [int(x) for x in p["players"]]
         for pid in pids:
-            if self.base.players[pid].是否队长:
-                raise ValueError(f"盲抽不能抽中队长 #{pid}")
-        if m.类别 == "混双":
-            genders = sorted(self.base.players[x].性别 for x in pids)
-            if genders != ["女", "男"]:
-                raise ValueError("混双盲抽必须为 1 男 1 女")
+            if self.base.players[pid].is_captain:
+                raise ValueError(f"blind draw cannot select a captain (#{pid})")
+        if m.category == "XD":
+            genders = sorted(self.base.players[x].gender for x in pids)
+            if genders != ["F", "M"]:
+                raise ValueError("XD blind draw must select exactly 1 male + 1 female")
         setattr(m, side, pids)
-        self.changelog.append(f"[{ev.ts}] {node_id} 队伍{tid} 盲抽: {pids}")
+        self.changelog.append(f"[{ev.ts}] {node_id} team {tid} blind draw: {pids}")
 
-    def _局结束(self, ev: Event) -> None:
+    def _game_finished(self, ev: Event) -> None:
         p = ev.payload
-        node_id, 场次 = p["节点"], p["场次"]
-        m = self._match(node_id, 场次)
-        局号 = int(p["局号"])
-        if 局号 != len(m.局分) + 1:
+        node_id, slot = p["node"], p["slot"]
+        m = self._match(node_id, slot)
+        game_no = int(p["game"])
+        if game_no != len(m.games) + 1:
             raise ValueError(
-                f"{node_id} {场次} 期望第{len(m.局分) + 1}局,收到第{局号}局"
+                f"{node_id} {slot} expects game {len(m.games) + 1}, got game {game_no}"
             )
-        if m.胜方() is not None:
-            raise ValueError(f"{node_id} {场次} 已决出胜负,不能再录入")
-        比分 = (int(p["比分"][0]), int(p["比分"][1]))
-        上限 = self.分制(node_id)
-        if max(比分) < 上限:
-            raise ValueError(f"比分 {比分} 与 {上限} 分制不符")
-        m.局分.append(比分)
-        self.changelog.append(f"[{ev.ts}] {node_id} {场次} 第{局号}局 {比分[0]}:{比分[1]}")
+        if m.winner() is not None:
+            raise ValueError(f"{node_id} {slot} is already decided")
+        score = (int(p["score"][0]), int(p["score"][1]))
+        cap = self.points_for(node_id)
+        if max(score) < cap:
+            raise ValueError(f"score {score} inconsistent with {cap}-point scoring")
+        m.games.append(score)
+        self.changelog.append(f"[{ev.ts}] {node_id} {slot} game {game_no} {score[0]}:{score[1]}")
 
-    def _缺席登记(self, ev: Event) -> None:
+    def _absence_registered(self, ev: Event) -> None:
         p = ev.payload
-        tid = int(p["队伍"])
-        self.缺人[tid] = {"缺席者": int(p["缺席者序号"]), "顶替": {}}
+        tid = int(p["team"])
+        self.shorthanded[tid] = {"absent_id": int(p["absent_id"]), "substitutes": {}}
         self.changelog.append(
-            f"[{ev.ts}] 队伍{tid} 缺席登记 #{p['缺席者序号']},该队改 {self.cfg['赛制']['缺人队伍分数']} 分制"
+            f"[{ev.ts}] team {tid} absence registered (#{p['absent_id']}), "
+            f"team switches to {self.cfg['format']['shorthanded_points']}-point scoring"
         )
 
-    def _顶替指定(self, ev: Event) -> None:
+    def _substitute_assigned(self, ev: Event) -> None:
         p = ev.payload
-        tid, 轮次, pid = int(p["队伍"]), int(p["轮次"]), int(p["顶替者序号"])
-        if tid not in self.缺人:
-            raise ValueError(f"队伍{tid}未登记缺席,不能指定顶替")
-        used = self.缺人[tid]["顶替"]
+        tid, round_no, pid = int(p["team"]), int(p["round"]), int(p["substitute_id"])
+        if tid not in self.shorthanded:
+            raise ValueError(f"team {tid} has no registered absence")
+        used = self.shorthanded[tid]["substitutes"]
         for r, existing in used.items():
-            if r != 轮次 and existing == pid:
+            if r != round_no and existing == pid:
                 raise ValueError(
-                    f"#{pid} 已在第{r}轮顶替过,三轮顶替队员不能重复"
+                    f"#{pid} already substituted in round {r}; "
+                    "substitutes must differ across the three rounds"
                 )
-        used[轮次] = pid
-        self.changelog.append(f"[{ev.ts}] 队伍{tid} 第{轮次}轮由 #{pid} 顶替出战")
+        used[round_no] = pid
+        self.changelog.append(f"[{ev.ts}] team {tid} round {round_no} substitute: #{pid}")
 
 
 def replay_matchday(
     base: TournamentState, events: List[Event], cfg: dict
 ) -> MatchDayState:
-    """在赛前状态之上重放比赛日事件。"""
+    """Replay match-day events on top of the pre-match state."""
     md = MatchDayState(base=base, cfg=cfg)
     for ev in events:
         if ev.type in PRE_MATCH_EVENTS:

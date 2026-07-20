@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""导入线下已公布的分队结果(如 PDF 名单): 追加"指定分队"事件。
+"""Import an offline-published team assignment (e.g. the PDF roster):
+appends an assign_teams event.
 
-读取仓库根目录 players.csv(列: team_id,team_captain,name,role,gender),
-按姓名匹配初始人员表得到序号,写入事件日志并导出快照。
+Reads players.csv at the repo root (columns: team_id,team_captain,name,role,gender),
+matches names against the initial roster, writes the event and exports a snapshot.
 
-用法:
-    python3 cli/import_teams.py [--roster players.csv] [--actor 主办方] [--date 20260612]
+Usage:
+    python3 cli/import_teams.py [--roster players.csv] [--actor organizer] [--date 20260612]
 """
 from __future__ import annotations
 
@@ -23,27 +24,27 @@ from core.replay import replay
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="导入线下分队结果")
+    ap = argparse.ArgumentParser(description="import offline team assignment")
     ap.add_argument("--roster", default=str(io_utils.REPO_ROOT / "players.csv"))
-    ap.add_argument("--actor", default="主办方")
+    ap.add_argument("--actor", default="organizer")
     ap.add_argument("--date", default=None)
     args = ap.parse_args()
 
     cfg = io_utils.load_config()
     players = io_utils.load_players()
-    by_name = {p.姓名: p.序号 for p in players.values()}
+    by_name = {p.name: p.id for p in players.values()}
     if len(by_name) != len(players):
-        raise SystemExit("人员表存在重名,无法按姓名导入")
+        raise SystemExit("initial roster has duplicate names; cannot import by name")
 
     teams: dict = {}
     with open(args.roster, encoding="utf-8") as f:
         for row in csv.DictReader(f):
             name = row["name"].strip()
             if name not in by_name:
-                raise SystemExit(f"名单中的 {name} 不在初始人员表里")
+                raise SystemExit(f"{name} from the roster is not in the initial player tables")
             tid = int(row["team_id"])
             pid = by_name[name]
-            # 队长放首位
+            # captain goes first
             if row["role"].strip() == "captain":
                 teams.setdefault(tid, []).insert(0, pid)
             else:
@@ -52,20 +53,20 @@ def main() -> None:
     ev = Event(
         seq=io_utils.next_seq(),
         ts=datetime.now().isoformat(timespec="seconds"),
-        type="指定分队",
+        type="assign_teams",
         actor=args.actor,
-        payload={"队伍": {str(t): ms for t, ms in sorted(teams.items())}},
+        payload={"teams": {str(t): ms for t, ms in sorted(teams.items())}},
         seed=None,
     )
     io_utils.append_event(ev)
 
-    state = replay(players, io_utils.read_events(), cfg["人员"]["队伍数量"])
-    state.validate(cfg["人员"]["每队女生数"], cfg["人员"]["每队男生数"])
+    state = replay(players, io_utils.read_events(), cfg["players"]["num_teams"])
+    state.validate(cfg["players"]["females_per_team"], cfg["players"]["males_per_team"])
 
     date_str = args.date or datetime.now().strftime("%Y%m%d")
     out = io_utils.snapshot_path(date_str)
     io_utils.export_teams_csv(state, out)
-    print(f"导入完成,共 {len(teams)} 队,快照: {out}")
+    print(f"import complete, {len(teams)} teams, snapshot: {out}")
 
 
 if __name__ == "__main__":

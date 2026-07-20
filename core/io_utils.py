@@ -1,6 +1,6 @@
-"""IO 层(非纯): 配置/人员表/事件日志的读写与 CSV 快照导出。
+"""IO layer (impure): config / roster / event log / CSV snapshot export.
 
-core 其余模块保持纯函数;所有文件与时间操作集中在这里和 cli/。
+Everything else in core stays pure; file and clock access live here and in cli/.
 """
 from __future__ import annotations
 
@@ -29,12 +29,12 @@ def load_players(data_dir: Path = DATA_DIR) -> Dict[int, Player]:
         with open(data_dir / name, encoding="utf-8") as f:
             for row in csv.DictReader(f):
                 p = Player(
-                    序号=int(row["序号"]),
-                    姓名=row["姓名"].strip(),
-                    性别=row["性别"].strip(),
-                    是否队长=row["是否队长"].strip().lower() == "true",
+                    id=int(row["id"]),
+                    name=row["name"].strip(),
+                    gender=row["gender"].strip(),
+                    is_captain=row["is_captain"].strip().lower() == "true",
                 )
-                players[p.序号] = p
+                players[p.id] = p
     return players
 
 
@@ -62,7 +62,7 @@ def next_seq(path: Path = EVENTS_PATH) -> int:
 
 
 def snapshot_path(date_str: str, data_dir: Path = DATA_DIR) -> Path:
-    """teams_YYYYMMDD.csv;同日再次生成则追加 _2/_3 序号。"""
+    """teams_YYYYMMDD.csv; later snapshots on the same day get _2/_3 suffixes."""
     base = data_dir / f"teams_{date_str}.csv"
     if not base.exists():
         return base
@@ -75,12 +75,13 @@ def snapshot_path(date_str: str, data_dir: Path = DATA_DIR) -> Path:
 def export_teams_csv(state: TournamentState, out_path: Path) -> None:
     with open(out_path, "w", encoding="utf-8", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["序号", "姓名", "性别", "角色", "队伍编号", "队长姓名"])
+        w.writerow(["id", "name", "gender", "role", "team_id", "captain_name"])
         for tid in sorted(state.teams):
             members = state.teams[tid]
             captain = state.players[members[0]]
             for pid in members:
                 p = state.players[pid]
                 w.writerow(
-                    [p.序号, p.姓名, p.性别, "队长" if p.是否队长 else "队员", tid, captain.姓名]
+                    [p.id, p.name, p.gender, "captain" if p.is_captain else "member",
+                     tid, captain.name]
                 )

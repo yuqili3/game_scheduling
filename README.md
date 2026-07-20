@@ -21,7 +21,7 @@
 ## 目录结构
 
 ```
-config.yaml              # 全部超参数(中文键名): 人员/赛制/场地/时长模型/可视化/志愿者
+config.yaml              # 全部超参数(英文键名,中文注释): 人员/赛制/场地/时长/可视化/志愿者
 data/
   players_female.csv     # 初始人员表·女(序号 1-16)
   players_male.csv       # 初始人员表·男(序号 17-64,其中 17-24 为八名队长)
@@ -97,12 +97,12 @@ python3 cli/withdraw.py --withdrawn 17 --new-captain 25 --substitute "候补姓�
 
 | 事件类型 | 何时写入 | 关键字段 |
 |---------|---------|---------|
-| 对阵抽签 | 签到时队长抽 G1–G8 | 分组(G 编号 → 队伍) |
-| 名单提交 | 每轮开赛前 | 节点、队伍、女双/男双1-3 名单 |
-| 盲抽结果 | 每轮抽完第五场 | 节点、队伍、被抽中队员 |
-| 局结束 | 每局打完(志愿者录入) | 节点、场次、局号、比分 |
-| 缺席登记 | 有人伤/缺 | 队伍、缺席者(该队全部改 15 分制) |
-| 顶替指定 | 每轮队长指定 | 队伍、轮次、顶替者(三轮不得重复,程序校验) |
+| group_draw | 签到时队长抽 G1–G8 | groups(G 编号 → 队伍) |
+| lineup_submit | 每轮开赛前 | node、team、WD/MD1-3 名单 |
+| blind_draw_result | 每轮抽完第五场 | node、team、被抽中队员 |
+| game_finished | 每局打完(志愿者录入) | node、slot、game、score |
+| absence_registered | 有人伤/缺 | team、absent_id(该队全部改 15 分制) |
+| substitute_assigned | 每轮队长指定 | team、round、substitute_id(三轮不得重复,程序校验) |
 
 查看当前排程与赛况:
 
