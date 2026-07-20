@@ -6,7 +6,7 @@
 - 跨轮(按对阵粒度): 节点的两个上游对抗都结束后即可开打(+ 休息间隔)
 - 场地分上下两个半区各 每组场地数 块,组内贪心取最早空闲场地
 - 时长: 基础(女双/男双/混双) × 15分制缩放(缺人队伍) + 强强对话加时;
-  未打的第三局按 第三局概率 加权占时
+  未打的第三局按满时长预留(时长瓶颈按最坏情况),2:0 结束后重排自动释放
 """
 from __future__ import annotations
 
@@ -50,24 +50,21 @@ def game_minutes(md: MatchDayState, node_id: str, 场次: str) -> float:
     return base
 
 
-def _remaining_games(md: MatchDayState, node_id: str, 场次: str) -> List[Tuple[int, float]]:
-    """未打完的局: [(局号, 时长权重)];权重 1.0 = 必打,第三局可能为概率加权。"""
+def _remaining_games(md: MatchDayState, node_id: str, 场次: str) -> List[Tuple[int, bool]]:
+    """未打完的局: [(局号, 是否条件局)]。
+
+    第三局即使尚不确定是否发生,也按满时长预留场地——排程是时长瓶颈,
+    必须按最坏情况估计;实际 2:0 结束后重排,该时段自动释放。
+    """
     m = md.matches.get((node_id, 场次))
     played = len(m.局分) if m else 0
     if m and m.胜方() is not None:
         return []
-    p3 = float(md.cfg["时长模型"].get("第三局概率", 0.5))
     每场局数 = md.cfg["赛制"]["每场局数"]
-    out: List[Tuple[int, float]] = []
+    out: List[Tuple[int, bool]] = []
     for g in range(played + 1, 每场局数 + 1):
-        if g < 每场局数:
-            out.append((g, 1.0))
-        else:
-            # 最后一局: 若已 1:1 则必打,否则按概率加权
-            if m and len(m.局分) == 每场局数 - 1:
-                out.append((g, 1.0))
-            elif played < 每场局数 - 1:
-                out.append((g, p3))
+        必打 = g < 每场局数 or (m is not None and len(m.局分) == 每场局数 - 1)
+        out.append((g, not 必打))
     return out
 
 
@@ -117,11 +114,10 @@ def plan(md: MatchDayState, now: float = 0.0) -> List[Slot]:
             court = min(bank, key=lambda c: (court_free[c], c))
             start = max(court_free[court], earliest)
             t = start
-            for 局号, weight in games:
-                use = dur * weight
-                标注 = "第三局(条件)" if (weight < 1.0) else ""
-                slots.append(Slot(t, t + use, court, nid, 场次, 局号, 标注))
-                t += use
+            for 局号, 条件局 in games:
+                标注 = "第三局(条件)" if 条件局 else ""
+                slots.append(Slot(t, t + dur, court, nid, 场次, 局号, 标注))
+                t += dur
             court_free[court] = t + 间隔
             return t
 
