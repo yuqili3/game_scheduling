@@ -35,7 +35,12 @@ core/                    # 纯函数层(不碰文件/时钟/全局随机数)
   scheduler.py           # 时长模型 + 贪心排程 + 事件驱动重排
   replay.py              # 赛前事件重放
   io_utils.py            # IO 层: 配置/人员表/事件日志/CSV 导出
+  eventstore.py          # SQLite 事件存储(志愿者并发写),自动导出回 events.jsonl
 cli/                     # 命令行工具(写事件的唯一入口之一)
+app/                     # Streamlit 直播 App
+  Home.py                # 观众页: 场地五色面板 + 对阵树 + 排名 + 下一场
+  pages/1_Score_Entry.py # 志愿者录入页(独立 PIN,只见分管场地)
+  pages/2_Admin.py       # 管理页: 对阵抽签/名单/盲抽/缺席顶替
 tests/                   # 单元测试: python3 -m unittest discover -s tests
 ```
 
@@ -119,10 +124,26 @@ python3 cli/schedule.py          # 场地×时间计划表 + 对阵树状态 + �
   才触发,第一轮不加时);未打的第三局按满时长预留(最坏情况),实际 2:0 后重排释放
 - 10 块场地分两个半区各 5 块,组内贪心分配,目标最大化利用率
 
-### 阶段 5:比赛日直播(M3,开发中)
+### 阶段 5:比赛日直播
 
-Streamlit App:观众页(场地五色状态面板、对阵树晋级图、实时比分、下一场安排)+
-志愿者录入页(独立 PIN、只见自己分管的场地、卡片显示场上 4 名选手与第几局以便核对)。
+```bash
+pip3 install -r requirements.txt
+streamlit run app/Home.py        # 场馆笔记本上启动,手机浏览器访问局域网 IP:8501
+```
+
+三个页面:
+
+- **Home(观众页)**:10 块场地网格,颜色即状态(绿=空闲/黄=热身/浅红·深红·紫红=
+  第 1/2/3 局),每格显示对阵、场上选手、实时比分与预计时间;对阵树三轮晋级图;
+  实时排名;盲抽公示;"下一场"列表。按 `broadcast.refresh_seconds` 自动刷新
+- **Score Entry(志愿者录入)**:从 `broadcast.volunteers` 选择姓名 + 独立 PIN 登录,
+  只显示自己分管的场地;卡片展示对阵队伍、场上 4 名选手、下一局局号、当前分制,
+  与场上人员核对后录入比分。写入前先过状态机校验,非法比分直接拒绝
+- **Admin(管理页)**:`broadcast.admin_pin` 登录;录入对阵抽签、每轮名单、盲抽结果、
+  缺席登记与顶替指定(校验三轮顶替不重复)
+
+并发与存储:所有写入经 SQLite(WAL)串行化,每次追加后自动导出回 `events.jsonl`,
+纯文本审计与 git 备份始终最新;赛前 CLI 写入的事件在 App 启动时自动导入。
 
 ## 可复现性验收标准
 

@@ -45,6 +45,7 @@ visual:
 broadcast:
   refresh_seconds: 5
   session_start: "17:10"  # local time of first serve, used for display
+  admin_pin: "0719"       # admin desk page
   volunteers:
     - name: VolunteerA
       pin: "1111"
