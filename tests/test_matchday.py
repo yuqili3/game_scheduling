@@ -8,7 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from core import rules
-from core.draw import draw_teams
+from core.draw import blind_draw_pick, draw_teams
 from core.io_utils import load_config, load_players
 from core.matchday import MatchDayState, replay_matchday
 from core.models import Event, TournamentState
@@ -154,6 +154,88 @@ class TestMatchDay(unittest.TestCase):
         self.assertEqual(md2.points_for("R1-3"), CFG["format"]["points_per_game"])
 
 
+class TestBlindDraw(unittest.TestCase):
+    def _md_after_r1(self):
+        md = md_with_groups()
+        evs = [group_draw_event()]
+        seq = 2
+        for nid in ("R1-1", "R1-2", "R1-3", "R1-4"):
+            les = lineup_events(md, nid, seq)
+            seq += len(les)
+            evs += les
+            ses = score_events(nid, seq)
+            seq += len(ses)
+            evs += ses
+        return replay_matchday(base_state(), evs, CFG)
+
+    def test_seeded_pick_deterministic_and_valid(self):
+        md = md_with_groups()
+        fem, mal = md.blind_eligible("R1-1", 1)
+        p1 = blind_draw_pick("XD", fem, mal, seed=42)
+        p2 = blind_draw_pick("XD", fem, mal, seed=42)
+        self.assertEqual(p1, p2)
+        genders = sorted(md.base.players[p].gender for p in p1)
+        self.assertEqual(genders, ["F", "M"])
+        self.assertNotEqual(p1, blind_draw_pick("XD", fem, mal, seed=43))
+        md_pick = blind_draw_pick("MD", fem, mal, seed=7)
+        self.assertEqual(len(set(md_pick)), 2)
+        self.assertTrue(all(md.base.players[p].gender == "M" for p in md_pick))
+
+    def test_eligibility_excludes_prior_round_picks(self):
+        md = self._md_after_r1()
+        # R1-1 blind for team 1 used women[0] and men[0] (see lineup_events)
+        used = set(md.matches[("R1-1", "BLIND")].a)
+        fem, mal = md.blind_eligible("R2-WU", 1)
+        self.assertFalse(used & set(fem) or used & set(mal))
+
+    def test_event_rejects_prior_round_repeat(self):
+        md = self._md_after_r1()
+        repeat = md.matches[("R1-1", "BLIND")].a  # team 1's round-1 pair
+        with self.assertRaises(ValueError):
+            md.apply(ev(99, "blind_draw_result",
+                        {"node": "R2-WU", "team": 1, "players": repeat}))
+
+
+class TestCorrection(unittest.TestCase):
+    def _md_with_games(self, games):
+        md = md_with_groups()
+        evs = [group_draw_event()] + lineup_events(md, "R1-1", 2)
+        seq = 10
+        for i, score in enumerate(games, start=1):
+            evs.append(ev(seq, "game_finished",
+                          {"node": "R1-1", "slot": "WD", "game": i, "score": list(score)}))
+            seq += 1
+        return replay_matchday(base_state(), evs, CFG), seq
+
+    def test_correction_replaces_score(self):
+        md, seq = self._md_with_games([(21, 15)])
+        md.apply(ev(seq, "game_corrected",
+                    {"node": "R1-1", "slot": "WD", "game": 1, "score": [15, 21]}))
+        self.assertEqual(md.matches[("R1-1", "WD")].games, [(15, 21)])
+
+    def test_correction_drops_games_after_decision(self):
+        """21:15 / 10:21 / 21:10 = a wins 2:1; correcting game 2 to 21:10 makes
+        the match decided after two games, so game 3 is dropped."""
+        md, seq = self._md_with_games([(21, 15), (10, 21), (21, 10)])
+        md.apply(ev(seq, "game_corrected",
+                    {"node": "R1-1", "slot": "WD", "game": 2, "score": [21, 10]}))
+        m = md.matches[("R1-1", "WD")]
+        self.assertEqual(m.games, [(21, 15), (21, 10)])
+        self.assertEqual(m.winner(), "a")
+
+    def test_correction_rejects_missing_game(self):
+        md, seq = self._md_with_games([(21, 15)])
+        with self.assertRaises(ValueError):
+            md.apply(ev(seq, "game_corrected",
+                        {"node": "R1-1", "slot": "WD", "game": 2, "score": [21, 5]}))
+
+    def test_correction_rejects_tie(self):
+        md, seq = self._md_with_games([(21, 15)])
+        with self.assertRaises(ValueError):
+            md.apply(ev(seq, "game_corrected",
+                        {"node": "R1-1", "slot": "WD", "game": 1, "score": [21, 21]}))
+
+
 class TestDurationModel(unittest.TestCase):
     def _md_after_r1(self, score=(21, 15)):
         md = md_with_groups()
@@ -212,18 +294,23 @@ class TestScheduler(unittest.TestCase):
             if s.node in ("R1-3", "R1-4"):
                 self.assertGreaterEqual(s.court, 6)
 
-    def test_blind_match_waits_for_first_four(self):
+    def test_blind_waits_for_main_games_not_thirds(self):
+        """Blind starts after the first-four matches' games 1-2 (+ rest), and may
+        run in parallel with deferred conditional third games (template rule)."""
         md = md_with_groups()
         slots = plan(md)
         rest = CFG["duration"]["rest_minutes"]
         for nid in ("R1-1", "R1-2", "R1-3", "R1-4"):
-            firsts = [s for s in slots if s.node == nid and s.match_slot != "BLIND"]
+            mains = [s for s in slots
+                     if s.node == nid and s.match_slot != "BLIND" and s.game <= 2]
+            thirds = [s for s in slots
+                      if s.node == nid and s.match_slot != "BLIND" and s.game == 3]
             blind = [s for s in slots if s.node == nid and s.match_slot == "BLIND"]
             self.assertTrue(blind)
-            self.assertGreaterEqual(
-                min(b.start for b in blind),
-                max(f.end for f in firsts) + rest - 1e-9,
-            )
+            blind_start = min(b.start for b in blind)
+            self.assertGreaterEqual(blind_start, max(f.end for f in mains) + rest - 1e-9)
+            # utilization win: blind does NOT wait for the conditional thirds
+            self.assertLess(blind_start, max(t.end for t in thirds))
 
     def test_round_dependency(self):
         md = md_with_groups()

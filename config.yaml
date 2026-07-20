@@ -46,6 +46,15 @@ broadcast:
   refresh_seconds: 5
   session_start: "17:10"  # local time of first serve, used for display
   admin_pin: "0719"       # admin desk page
+  captain_pins:           # per team id, unlocks the captain lineup page
+    1: "9001"
+    2: "9002"
+    3: "9003"
+    4: "9004"
+    5: "9005"
+    6: "9006"
+    7: "9007"
+    8: "9008"
   volunteers:
     - name: VolunteerA
       pin: "1111"

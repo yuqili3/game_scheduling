@@ -1,22 +1,37 @@
-"""Scheduler: duration model + greedy planning. Pure functions; event-driven
-re-planning = call plan() again after every event.
+"""Scheduler: duration model + template-aligned list scheduling. Pure functions;
+event-driven re-planning = call plan() again after every event.
 
-Rules:
-- within a matchup: WD and MD1-3 run in parallel (rosters are disjoint by
-  rule); the blind match waits for all four to finish plus rest_minutes
-- across rounds (per-matchup granularity): a node starts as soon as both of
-  its feeder matchups have finished (+ rest)
-- courts are split into two banks of per_bank; greedy earliest-free within bank
-- duration: base (WD/MD/XD) x short-handed scaling + strong-pair bonus;
-  an undecided third game reserves its full duration (scheduling is the time
-  bottleneck, so estimate worst-case); a 2:0 finish frees the slot on re-plan
+Scheduling follows the venue's court-allocation template (tournament PDF
+appendix) rather than naive greedy serialization:
+
+- within a matchup, WD and MD1-3 play their first two games as contiguous
+  blocks on parallel courts (rosters are disjoint by rule);
+- the blind match becomes ready as soon as those four matches have finished
+  their first two games (+ rest), NOT when they are fully decided — possible
+  third games are deferred and filled into whatever courts are free, exactly
+  like the "3rd, TBD" slots of the template. This is what lifts utilization
+  over a plain greedy plan;
+- across rounds (per-matchup granularity): a node starts once both feeder
+  matchups have finished (+ rest);
+- courts are split into two banks of per_bank; within a bank, free courts are
+  assigned to the ready unit that can start earliest (ties broken by
+  main-before-third, matchup order, slot order);
+- duration: base (WD/MD/XD) x short-handed scaling + strong-pair bonus; an
+  undecided third game reserves its full duration (worst case) and is
+  released by re-planning when a match ends 2:0.
+
+Planning note: a conditional third game may overlap the blind match on other
+courts even though they could share a player; like the template's TBD slots,
+actual conflicts resolve at re-plan time when real results arrive.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 from .matchday import MatchDayState
+
+FIRST_FOUR = ("WD", "MD1", "MD2", "MD3")
 
 
 @dataclass(frozen=True)
@@ -28,6 +43,24 @@ class Slot:
     match_slot: str
     game: int  # 1/2; 3 may be conditional
     note: str = ""
+
+
+@dataclass
+class _Unit:
+    """A contiguous block of games of one match assigned to one court."""
+
+    node: str
+    slot: str
+    kind: str  # "main" (games 1-2) or "third"
+    games: List[Tuple[int, bool]]  # (game_no, conditional)
+    deps: List[Tuple[str, str, str]] = field(default_factory=list)
+    base_ready: float = 0.0
+    rest_after_deps: bool = False
+    prio: Tuple[int, int, int] = (0, 0, 0)
+
+    @property
+    def key(self) -> Tuple[str, str, str]:
+        return (self.node, self.slot, self.kind)
 
 
 def game_minutes(md: MatchDayState, node_id: str, slot: str) -> float:
@@ -74,9 +107,42 @@ def _remaining_games(md: MatchDayState, node_id: str, slot: str) -> List[Tuple[i
     return out
 
 
+def _node_units(md: MatchDayState, nid: str, ready: float, order: int) -> List[_Unit]:
+    """Split a matchup's remaining games into schedulable units with
+    template-style dependencies."""
+    games_per_match = md.cfg["format"]["games_per_match"]
+    units: List[_Unit] = []
+    main_keys: List[Tuple[str, str, str]] = []
+
+    for si, slot in enumerate(FIRST_FOUR):
+        rem = _remaining_games(md, nid, slot)
+        main = [g for g in rem if g[0] < games_per_match]
+        third = [g for g in rem if g[0] == games_per_match]
+        if main:
+            u = _Unit(nid, slot, "main", main, [], ready, False, (0, order, si))
+            units.append(u)
+            main_keys.append(u.key)
+        if third:
+            deps = [(nid, slot, "main")] if main else []
+            units.append(_Unit(nid, slot, "third", third, deps, ready, False, (2, order, si)))
+
+    rem = _remaining_games(md, nid, "BLIND")
+    bmain = [g for g in rem if g[0] < games_per_match]
+    bthird = [g for g in rem if g[0] == games_per_match]
+    if bmain:
+        # ready once the first-four matches finish their first two games + rest
+        units.append(_Unit(nid, "BLIND", "main", bmain, list(main_keys), ready,
+                           bool(main_keys), (1, order, 4)))
+    if bthird:
+        deps = [(nid, "BLIND", "main")] if bmain else list(main_keys)
+        units.append(_Unit(nid, "BLIND", "third", bthird, deps, ready,
+                           bool(not bmain and main_keys), (3, order, 4)))
+    return units
+
+
 def plan(md: MatchDayState, now: float = 0.0) -> List[Slot]:
     """Plan every unfinished game from `now` (minutes since session start).
-    Deterministic greedy, no randomness."""
+    Deterministic template-aligned list scheduling, no randomness."""
     cfg = md.cfg
     per_bank = cfg["courts"]["per_bank"]
     total = cfg["courts"]["total"]
@@ -87,7 +153,7 @@ def plan(md: MatchDayState, now: float = 0.0) -> List[Slot]:
         1: list(range(per_bank + 1, total + 1)),
     }
     court_free: Dict[int, float] = {c: now for c in range(1, total + 1)}
-    slots: List[Slot] = []
+    slots_out: List[Slot] = []
     node_end: Dict[str, float] = {}
 
     def node_ready(nid: str) -> float:
@@ -103,46 +169,59 @@ def plan(md: MatchDayState, now: float = 0.0) -> List[Slot]:
                 t = max(t, node_end.get(fid, now) + rest)
         return t
 
-    # process the 12 nodes in round order (stable id sort within a round
-    # keeps the plan deterministic)
-    for nid in sorted(md.nodes, key=lambda i: (md.nodes[i].round, i)):
-        node = md.nodes[nid]
-        if md.node_finished(nid):
-            node_end[nid] = now
-            continue
-        ready = node_ready(nid)
-        bank = banks[node.bank]
-        match_end: Dict[str, float] = {}
+    rounds = sorted({n.round for n in md.nodes.values()})
+    for round_no in rounds:
+        for bank_id in (0, 1):
+            nids = sorted(
+                n for n, node in md.nodes.items()
+                if node.round == round_no and node.bank == bank_id
+            )
+            bank = banks[bank_id]
+            units: List[_Unit] = []
+            for order, nid in enumerate(nids):
+                if md.node_finished(nid):
+                    node_end[nid] = now
+                    continue
+                units += _node_units(md, nid, node_ready(nid), order)
 
-        def schedule_match(slot: str, earliest: float) -> Optional[float]:
-            games = _remaining_games(md, nid, slot)
-            if not games:
-                return None
-            dur = game_minutes(md, nid, slot)
-            court = min(bank, key=lambda c: (court_free[c], c))
-            start = max(court_free[court], earliest)
-            t = start
-            for game_no, conditional in games:
-                note = "game 3 (conditional)" if conditional else ""
-                slots.append(Slot(t, t + dur, court, nid, slot, game_no, note))
-                t += dur
-            court_free[court] = t + changeover
-            return t
+            ends: Dict[Tuple[str, str, str], float] = {}
+            pending = list(units)
+            while pending:
+                # units whose dependencies are all scheduled
+                candidates = []
+                for u in pending:
+                    if not all(d in ends for d in u.deps):
+                        continue
+                    ready = u.base_ready
+                    if u.deps:
+                        dep_end = max(ends[d] for d in u.deps)
+                        ready = max(ready, dep_end + (rest if u.rest_after_deps else 0.0))
+                    candidates.append((ready, u))
+                court = min(bank, key=lambda c: (court_free[c], c))
+                # the unit that can actually start earliest wins;
+                # ties: main before third, matchup order, slot order
+                ready, u = min(
+                    candidates,
+                    key=lambda x: (max(court_free[court], x[0]), x[1].prio),
+                )
+                start = max(court_free[court], ready)
+                dur = game_minutes(md, u.node, u.slot)
+                t = start
+                for game_no, conditional in u.games:
+                    note = "game 3 (conditional)" if conditional else ""
+                    slots_out.append(Slot(t, t + dur, court, u.node, u.slot, game_no, note))
+                    t += dur
+                court_free[court] = t + changeover
+                ends[u.key] = t
+                pending.remove(u)
 
-        # first four matches run in parallel
-        for slot in ("WD", "MD1", "MD2", "MD3"):
-            end = schedule_match(slot, ready)
-            if end is not None:
-                match_end[slot] = end
-        # blind match waits for all four + rest
-        first_four_end = max(match_end.values()) if match_end else ready
-        blind_ready = (first_four_end + rest) if match_end else ready
-        end = schedule_match("BLIND", blind_ready)
-        if end is not None:
-            match_end["BLIND"] = end
-        node_end[nid] = max(match_end.values()) if match_end else now
+            for nid in nids:
+                if md.node_finished(nid):
+                    continue
+                unit_ends = [e for k, e in ends.items() if k[0] == nid]
+                node_end[nid] = max(unit_ends) if unit_ends else now
 
-    return sorted(slots, key=lambda s: (s.start, s.court))
+    return sorted(slots_out, key=lambda s: (s.start, s.court))
 
 
 def utilization(slots: List[Slot], total_courts: int, now: float = 0.0) -> float:

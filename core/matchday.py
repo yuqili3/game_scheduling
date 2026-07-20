@@ -117,6 +117,37 @@ class MatchDayState:
             )
         return out
 
+    def blind_prior_picks(self, tid: int, before_round: int) -> set:
+        """Players of a team already fielded in blind matches of earlier rounds."""
+        prior: set = set()
+        for (nid, s), m in self.matches.items():
+            if s != "BLIND" or self.nodes[nid].round >= before_round:
+                continue
+            teams = self.node_teams(nid)
+            if teams is None:
+                continue
+            if teams[0] == tid:
+                prior |= set(m.a)
+            elif teams[1] == tid:
+                prior |= set(m.b)
+        return prior
+
+    def blind_eligible(self, node_id: str, tid: int) -> Tuple[List[int], List[int]]:
+        """(eligible females, eligible males) for a team's blind match:
+        captains excluded, players drawn in earlier rounds' blinds excluded."""
+        prior = self.blind_prior_picks(tid, self.nodes[node_id].round)
+        members = self.base.teams[tid]
+        females = sorted(
+            p for p in members if self.base.players[p].gender == "F" and p not in prior
+        )
+        males = sorted(
+            p for p in members
+            if self.base.players[p].gender == "M"
+            and not self.base.players[p].is_captain
+            and p not in prior
+        )
+        return females, males
+
     def pair_strong(self, pids: List[int], round_no: int) -> bool:
         """Whether a pair counts as "strong" for the overtime bonus.
         Never strong in round 1.
@@ -152,6 +183,7 @@ class MatchDayState:
             "lineup_submit": self._lineup_submit,
             "blind_draw_result": self._blind_draw_result,
             "game_finished": self._game_finished,
+            "game_corrected": self._game_corrected,
             "absence_registered": self._absence_registered,
             "substitute_assigned": self._substitute_assigned,
         }.get(ev.type)
@@ -224,9 +256,14 @@ class MatchDayState:
         side = self._side_of_team(node_id, tid)
         m = self._match(node_id, "BLIND")
         pids = [int(x) for x in p["players"]]
+        prior = self.blind_prior_picks(tid, self.nodes[node_id].round)
         for pid in pids:
             if self.base.players[pid].is_captain:
                 raise ValueError(f"blind draw cannot select a captain (#{pid})")
+            if pid in prior:
+                raise ValueError(
+                    f"#{pid} was already drawn in an earlier round's blind match"
+                )
         if m.category == "XD":
             genders = sorted(self.base.players[x].gender for x in pids)
             if genders != ["F", "M"]:
@@ -251,6 +288,44 @@ class MatchDayState:
             raise ValueError(f"score {score} inconsistent with {cap}-point scoring")
         m.games.append(score)
         self.changelog.append(f"[{ev.ts}] {node_id} {slot} game {game_no} {score[0]}:{score[1]}")
+
+    def _game_corrected(self, ev: Event) -> None:
+        """Admin override for a mis-entered score: replaces one recorded game.
+
+        History is never rewritten — this is a compensating event; replay
+        applies the correction on top of the original entry. If the corrected
+        score changes when the match became decided, games recorded past that
+        point are dropped from the derived state.
+        """
+        p = ev.payload
+        node_id, slot, game_no = p["node"], p["slot"], int(p["game"])
+        key = (node_id, slot)
+        m = self.matches.get(key)
+        if m is None or game_no < 1 or game_no > len(m.games):
+            raise ValueError(f"{node_id} {slot} has no recorded game {game_no} to correct")
+        score = (int(p["score"][0]), int(p["score"][1]))
+        rules.game_winner(score)  # rejects ties
+        cap = self.points_for(node_id)
+        if max(score) < cap:
+            raise ValueError(f"score {score} inconsistent with {cap}-point scoring")
+        old = m.games[game_no - 1]
+        m.games[game_no - 1] = score
+        # truncate anything recorded after the match is now decided
+        games_to_win = self.cfg["format"]["games_per_match"] // 2 + 1
+        wins = {"a": 0, "b": 0}
+        keep = len(m.games)
+        for i, g in enumerate(m.games):
+            wins[rules.game_winner(g)] += 1
+            if max(wins.values()) >= games_to_win:
+                keep = i + 1
+                break
+        dropped = m.games[keep:]
+        del m.games[keep:]
+        note = f", dropped {len(dropped)} later game(s)" if dropped else ""
+        self.changelog.append(
+            f"[{ev.ts}] CORRECTION {node_id} {slot} game {game_no}: "
+            f"{old[0]}:{old[1]} -> {score[0]}:{score[1]}{note}"
+        )
 
     def _absence_registered(self, ev: Event) -> None:
         p = ev.payload

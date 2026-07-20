@@ -45,8 +45,8 @@ team_options = {
     for tid, members in sorted(md.base.teams.items())
 }
 
-tab_draw, tab_lineup, tab_blind, tab_absence = st.tabs(
-    ["Group draw", "Lineups", "Blind draw", "Absence / substitute"]
+tab_draw, tab_lineup, tab_blind, tab_absence, tab_fix = st.tabs(
+    ["Group draw", "Lineups", "Blind draw", "Absence / substitute", "Score correction"]
 )
 
 with tab_draw:
@@ -134,6 +134,30 @@ with tab_absence:
             ):
                 st.success("Substitute recorded.")
                 st.rerun()
+
+with tab_fix:
+    st.caption("Override a mis-entered score. The original entry stays in the "
+               "event log; a correction event is appended on top.")
+    scored = sorted({k for k, m in md.matches.items() if m.games})
+    if not scored:
+        st.info("No recorded games yet.")
+    else:
+        key = st.selectbox("Match", scored,
+                           format_func=lambda k: f"{k[0]} {k[1]}", key="fix_match")
+        m = md.matches[key]
+        st.markdown("recorded: " + "  ·  ".join(f"game {i + 1}: **{a} : {b}**"
+                                                for i, (a, b) in enumerate(m.games)))
+        with st.form("fix"):
+            game_no = st.selectbox("Game to correct", list(range(1, len(m.games) + 1)))
+            c1, c2 = st.columns(2)
+            a = c1.number_input("Corrected side A", min_value=0, max_value=40, step=1)
+            b = c2.number_input("Corrected side B", min_value=0, max_value=40, step=1)
+            if st.form_submit_button("Apply correction"):
+                payload = {"node": key[0], "slot": key[1], "game": int(game_no),
+                           "score": [int(a), int(b)]}
+                if precheck_and_append("game_corrected", payload):
+                    st.success("Correction applied — all pages update on next refresh.")
+                    st.rerun()
 
 st.divider()
 st.subheader("Event log (latest 20)")

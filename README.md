@@ -39,8 +39,9 @@ core/                    # 纯函数层(不碰文件/时钟/全局随机数)
 cli/                     # 命令行工具(写事件的唯一入口之一)
 app/                     # Streamlit 直播 App
   Home.py                # 观众页: 场地五色面板 + 对阵树 + 排名 + 下一场
-  pages/1_Score_Entry.py # 志愿者录入页(独立 PIN,只见分管场地)
-  pages/2_Admin.py       # 管理页: 对阵抽签/名单/盲抽/缺席顶替
+  pages/1_Score_Entry.py # 志愿者录入页(独立 PIN,只见分管场地,比分整轮留存)
+  pages/2_Admin.py       # 管理页: 对阵抽签/名单/盲抽/缺席顶替 + 比分更正
+  pages/3_Captain.py     # 队长页: 名单提交 + 种子盲抽 + 缺席/顶替(每队独立 PIN)
 tests/                   # 单元测试: python3 -m unittest discover -s tests
 ```
 
@@ -104,10 +105,11 @@ python3 cli/withdraw.py --withdrawn 17 --new-captain 25 --substitute "候补姓�
 |---------|---------|---------|
 | group_draw | 签到时队长抽 G1–G8 | groups(G 编号 → 队伍) |
 | lineup_submit | 每轮开赛前 | node、team、WD/MD1-3 名单 |
-| blind_draw_result | 每轮抽完第五场 | node、team、被抽中队员 |
+| blind_draw_result | 队长页种子盲抽(或 Admin 兜底) | node、team、被抽中队员;**seed 必带**,同种子可复现 |
 | game_finished | 每局打完(志愿者录入) | node、slot、game、score |
 | absence_registered | 有人伤/缺 | team、absent_id(该队全部改 15 分制) |
 | substitute_assigned | 每轮队长指定 | team、round、substitute_id(三轮不得重复,程序校验) |
+| game_corrected | Admin 更正错录比分 | node、slot、game、score;补偿事件,原录入保留;更正后多余局自动剔除 |
 
 查看当前排程与赛况:
 
@@ -117,8 +119,10 @@ python3 cli/schedule.py          # 场地×时间计划表 + 对阵树状态 + �
 
 排程规则(全部由 config 驱动):
 
-- 每轮每场对抗内:女双与男双 1–3 可并行(人员天然不重叠),盲抽局等这 4 场
-  全部结束且选手休息 ≥5 分钟后开打
+- **模板对齐**(参照赛程 PDF 附录的场地分配表,非朴素贪心):每场对抗内女双与
+  男双 1–3 的前两局并行;**盲抽局在这 4 场各打完前两局并休息 ≥5 分钟后即可开打,
+  不等可能的第三局**;条件第三局像模板的 "3rd, TBD" 一样推迟填入空闲场地。
+  最坏情况完赛 23:32 → 22:23,利用率 58.4% → 71.3%
 - **按对阵粒度提前开打**:下一轮某场对抗的两支队伍都打完上一轮即可上场,不等全轮
 - 时长预估:基础时长 × 15 分制缩放(缺人队伍)+ 强强对话加时(双方组合都"强"
   才触发,第一轮不加时);未打的第三局按满时长预留(最坏情况),实际 2:0 后重排释放
@@ -138,9 +142,17 @@ streamlit run app/Home.py        # 场馆笔记本上启动,手机浏览器访�
   实时排名;盲抽公示;"下一场"列表。按 `broadcast.refresh_seconds` 自动刷新
 - **Score Entry(志愿者录入)**:从 `broadcast.volunteers` 选择姓名 + 独立 PIN 登录,
   只显示自己分管的场地;卡片展示对阵队伍、场上 4 名选手、下一局局号、当前分制,
-  与场上人员核对后录入比分。写入前先过状态机校验,非法比分直接拒绝
+  与场上人员核对后录入比分。写入前先过状态机校验,非法比分直接拒绝。
+  **每提交一局,比分保留在页面并出现下一局的空输入框;打完的 match 留在场地
+  区域直到本轮全部结束才清空**(比分事件携带 court 号,支持按场地追溯)
+- **Captain(队长页)**:每队独立 PIN(`broadcast.captain_pins`)。三个标签页:
+  ① 提交本轮名单(有比分后锁定);② **种子盲抽**——输入随机种子,为**对方**
+  在合规池内(性别构成、非队长、排除前几轮已被抽中者)确定性抽出第五场人选,
+  种子入日志可复现;③ 缺席登记与每轮顶替指定(三轮不重复校验)
 - **Admin(管理页)**:`broadcast.admin_pin` 登录;录入对阵抽签、每轮名单、盲抽结果、
-  缺席登记与顶替指定(校验三轮顶替不重复)
+  缺席登记与顶替指定(校验三轮顶替不重复);**Score correction 标签页可更正
+  志愿者错录的比分**——以 `game_corrected` 补偿事件追加,原始录入保留在日志,
+  若更正改变胜负判定则多余的后续局自动剔除
 
 并发与存储:所有写入经 SQLite(WAL)串行化,每次追加后自动导出回 `events.jsonl`,
 纯文本审计与 git 备份始终最新;赛前 CLI 写入的事件在 App 启动时自动导入。

@@ -37,6 +37,27 @@ def draw_teams(players: Dict[int, Player], num_teams: int, seed: int) -> Dict[in
     return teams
 
 
+def blind_draw_pick(
+    category: str, females: List[int], males: List[int], seed: int
+) -> List[int]:
+    """Seed-determined blind-match pick from pre-filtered eligible pools.
+
+    XD: 1 female + 1 non-captain male; MD: 2 non-captain males. Pools must
+    already exclude captains and players drawn in earlier rounds' blind
+    matches (see MatchDayState.blind_eligible). Same seed, same pick.
+    """
+    rng = random.Random(seed)
+    if category == "XD":
+        if not females or not males:
+            raise ValueError("no eligible players left for an XD blind draw")
+        return [rng.choice(sorted(females)), rng.choice(sorted(males))]
+    if category == "MD":
+        if len(males) < 2:
+            raise ValueError("fewer than 2 eligible males for an MD blind draw")
+        return rng.sample(sorted(males), 2)
+    raise ValueError(f"unknown blind category: {category}")
+
+
 def withdraw_redraw(
     state: TournamentState,
     withdrawn_id: int,
