@@ -103,13 +103,15 @@ python3 cli/withdraw.py --withdrawn 17 --new-captain 25 --substitute "候补姓�
 
 | 事件类型 | 何时写入 | 关键字段 |
 |---------|---------|---------|
-| group_draw | 签到时队长抽 G1–G8 | groups(G 编号 → 队伍) |
+| group_draw | Admin 页种子随机分组 | groups(G 编号 → 队伍);seed 入日志可复现 |
 | lineup_submit | 每轮开赛前 | node、team、WD/MD1-3 名单 |
 | blind_draw_result | 队长页种子盲抽(或 Admin 兜底) | node、team、被抽中队员;**seed 必带**,同种子可复现 |
 | game_finished | 每局打完(志愿者录入) | node、slot、game、score |
 | absence_registered | 有人伤/缺 | team、absent_id(该队全部改 15 分制) |
 | substitute_assigned | 每轮队长指定 | team、round、substitute_id(三轮不得重复,程序校验) |
 | game_corrected | Admin 更正错录比分 | node、slot、game、score;补偿事件,原录入保留;更正后多余局自动剔除 |
+
+命名约定:败者半区一律称 **consolation**(节点 `R2-CU`/`R2-CL`),不使用 loser。
 
 查看当前排程与赛况:
 
@@ -142,17 +144,21 @@ streamlit run app/Home.py        # 场馆笔记本上启动,手机浏览器访�
   实时排名;盲抽公示;"下一场"列表。按 `broadcast.refresh_seconds` 自动刷新
 - **Score Entry(志愿者录入)**:从 `broadcast.volunteers` 选择姓名 + 独立 PIN 登录,
   只显示自己分管的场地;卡片展示对阵队伍、场上 4 名选手、下一局局号、当前分制,
-  与场上人员核对后录入比分。写入前先过状态机校验,非法比分直接拒绝。
+  与场上人员核对后录入比分。**页面顶部有与观众页相同的十场地五色示意图,
+  便于确认场上的人是对的**。写入前先过状态机校验,非法比分直接拒绝。
   **每提交一局,比分保留在页面并出现下一局的空输入框;打完的 match 留在场地
   区域直到本轮全部结束才清空**(比分事件携带 court 号,支持按场地追溯)
 - **Captain(队长页)**:每队独立 PIN(`broadcast.captain_pins`)。三个标签页:
   ① 提交本轮名单(有比分后锁定);② **种子盲抽**——输入随机种子,为**对方**
   在合规池内(性别构成、非队长、排除前几轮已被抽中者)确定性抽出第五场人选,
   种子入日志可复现;③ 缺席登记与每轮顶替指定(三轮不重复校验)
-- **Admin(管理页)**:`broadcast.admin_pin` 登录;录入对阵抽签、每轮名单、盲抽结果、
-  缺席登记与顶替指定(校验三轮顶替不重复);**Score correction 标签页可更正
-  志愿者错录的比分**——以 `game_corrected` 补偿事件追加,原始录入保留在日志,
-  若更正改变胜负判定则多余的后续局自动剔除
+- **Admin(管理页)**:`broadcast.admin_pin` 登录,三个标签:
+  ① **对阵抽签(种子驱动)**——输入随机种子把 8 队随机分到 G1–G8,种子入日志可复现;
+  ② **Lineups 状态总览**——按轮次监控每场对抗双方:名单是否提交、是否合规(缺项
+  逐条列出)、盲抽是否完成及结果(含种子)、各队缺席/顶替状态;录入动作在队长页,
+  Admin 只监督;
+  ③ **Score correction**——更正志愿者错录的比分,以 `game_corrected` 补偿事件追加,
+  原始录入保留在日志,若更正改变胜负判定则多余的后续局自动剔除
 
 并发与存储:所有写入经 SQLite(WAL)串行化,每次追加后自动导出回 `events.jsonl`,
 纯文本审计与 git 备份始终最新;赛前 CLI 写入的事件在 App 启动时自动导入。

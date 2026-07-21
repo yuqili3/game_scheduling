@@ -19,7 +19,15 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from common import court_status, fmt_clock, get_store, load_state, match_desc, names  # noqa: E402
+from common import (  # noqa: E402
+    court_status,
+    fmt_clock,
+    get_store,
+    load_state,
+    match_desc,
+    names,
+    render_court_grid,
+)
 from core.models import Event  # noqa: E402
 
 st.set_page_config(page_title="Score Entry", page_icon="✍️", layout="wide")
@@ -53,6 +61,10 @@ if current_round is None:
     st.stop()
 st.caption(f"Round {current_round} in progress — completed matches stay listed "
            "until the round ends.")
+
+with st.expander("Live court map (same as the spectator page) — verify the "
+                 "right people are on court", expanded=True):
+    render_court_grid(cfg, md, slots, now)
 
 
 def score_chips(games) -> str:

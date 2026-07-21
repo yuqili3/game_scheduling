@@ -11,20 +11,18 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from common import court_status, fmt_clock, load_state, match_desc, team_label  # noqa: E402
+from common import (  # noqa: E402
+    fmt_clock,
+    load_state,
+    match_desc,
+    render_court_grid,
+    team_label,
+)
 
 st.set_page_config(page_title="2026 Badminton Melee", page_icon="🏸", layout="wide")
 
 cfg, md, slots, now = load_state()
 refresh = int(cfg["broadcast"].get("refresh_seconds", 5))
-colors = cfg["visual"]["court_colors"]
-STATUS_LABEL = {
-    "idle": "Idle",
-    "warmup": "Warm-up",
-    "game1": "Game 1",
-    "game2": "Game 2",
-    "game3": "Game 3",
-}
 
 
 @st.fragment(run_every=refresh)
@@ -37,32 +35,7 @@ def live_view() -> None:
 
     # ---- court grid ----
     st.subheader("Courts")
-    total = cfg["courts"]["total"]
-    for row_start in range(1, total + 1, 5):
-        cols = st.columns(5)
-        for i, court in enumerate(range(row_start, min(row_start + 5, total + 1))):
-            status, slot = court_status(md, slots, court, now)
-            color = colors[status if status.startswith("game") else status]
-            with cols[i]:
-                if slot is not None:
-                    d = match_desc(md, slot)
-                    when = (
-                        "in play"
-                        if status.startswith("game")
-                        else f"next {fmt_clock(slot.start, cfg)}"
-                    )
-                    body = (
-                        f"<b>{d['matchup']}</b><br>{d['match']} · game {d['game']} · "
-                        f"to {d['points']} pts<br>{d['players']}<br>score: {d['score']}<br>{when}"
-                    )
-                else:
-                    body = "no matches planned"
-                st.markdown(
-                    f"""<div style="background:{color};border-radius:10px;padding:10px;
-                    min-height:150px;color:#111;font-size:0.82rem;line-height:1.35">
-                    <b>Court {court}</b> — {STATUS_LABEL[status]}<br>{body}</div>""",
-                    unsafe_allow_html=True,
-                )
+    render_court_grid(cfg, md, slots, now)
 
     # ---- bracket ----
     st.subheader("Bracket")

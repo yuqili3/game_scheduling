@@ -3,9 +3,10 @@
 The bracket has 12 nodes (3 rounds x 4 matchups); teams are referred to by
 their draw labels G1-G8:
   R1: G1vG2, G3vG4 (upper half) | G5vG6, G7vG8 (lower half)
-  R2: winners bracket W(R1-1)vW(R1-2), W(R1-3)vW(R1-4); losers bracket likewise
+  R2: winners bracket W(R1-1)vW(R1-2), W(R1-3)vW(R1-4); consolation bracket
+      (the round-1 losers — named "consolation", abbreviated C) likewise
   R3: places 1/2 = winners-bracket winners; 3/4 = their losers;
-      5/6 and 7/8 come from the losers bracket
+      5/6 and 7/8 come from the consolation bracket
 """
 from __future__ import annotations
 
@@ -30,13 +31,13 @@ def bracket() -> Dict[str, Node]:
     n["R1-3"] = Node("R1-3", 1, 1, ("G5", "G6"), "opening, lower")
     n["R1-4"] = Node("R1-4", 1, 1, ("G7", "G8"), "opening, lower")
     n["R2-WU"] = Node("R2-WU", 2, 0, (("R1-1", "win"), ("R1-2", "win")), "semis, winners")
-    n["R2-LU"] = Node("R2-LU", 2, 0, (("R1-1", "lose"), ("R1-2", "lose")), "semis, losers")
+    n["R2-CU"] = Node("R2-CU", 2, 0, (("R1-1", "lose"), ("R1-2", "lose")), "semis, consolation")
     n["R2-WL"] = Node("R2-WL", 2, 1, (("R1-3", "win"), ("R1-4", "win")), "semis, winners")
-    n["R2-LL"] = Node("R2-LL", 2, 1, (("R1-3", "lose"), ("R1-4", "lose")), "semis, losers")
+    n["R2-CL"] = Node("R2-CL", 2, 1, (("R1-3", "lose"), ("R1-4", "lose")), "semis, consolation")
     n["R3-12"] = Node("R3-12", 3, 0, (("R2-WU", "win"), ("R2-WL", "win")), "final, places 1/2")
     n["R3-34"] = Node("R3-34", 3, 0, (("R2-WU", "lose"), ("R2-WL", "lose")), "final, places 3/4")
-    n["R3-56"] = Node("R3-56", 3, 1, (("R2-LU", "win"), ("R2-LL", "win")), "final, places 5/6")
-    n["R3-78"] = Node("R3-78", 3, 1, (("R2-LU", "lose"), ("R2-LL", "lose")), "final, places 7/8")
+    n["R3-56"] = Node("R3-56", 3, 1, (("R2-CU", "win"), ("R2-CL", "win")), "final, places 5/6")
+    n["R3-78"] = Node("R3-78", 3, 1, (("R2-CU", "lose"), ("R2-CL", "lose")), "final, places 7/8")
     return n
 
 

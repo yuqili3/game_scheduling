@@ -148,6 +148,35 @@ class MatchDayState:
         )
         return females, males
 
+    def lineup_status(self, node_id: str, tid: int) -> dict:
+        """Submission/compliance status of a team's lineup for a matchup.
+
+        Returns {"submitted": bool, "complete": bool, "issues": [str],
+                 "lineup": {slot: [pids]}}. Issues list what is missing or
+        non-compliant (2 players per slot, correct genders, no man in two MDs).
+        """
+        side = self._side_of_team(node_id, tid)
+        lineup: Dict[str, List[int]] = {}
+        issues: List[str] = []
+        for slot in ("WD", "MD1", "MD2", "MD3"):
+            m = self.matches.get((node_id, slot))
+            pids = list(getattr(m, side)) if m else []
+            lineup[slot] = pids
+            if len(pids) != 2:
+                issues.append(f"{slot}: needs 2 players (has {len(pids)})")
+        for pid in lineup["WD"]:
+            if self.base.players[pid].gender != "F":
+                issues.append(f"WD: #{pid} is not female")
+        males = [p for s in ("MD1", "MD2", "MD3") for p in lineup[s]]
+        for pid in males:
+            if self.base.players[pid].gender != "M":
+                issues.append(f"#{pid} in an MD slot is not male")
+        if len(males) != len(set(males)):
+            issues.append("a man is fielded in more than one MD")
+        submitted = any(lineup.values())
+        return {"submitted": submitted, "complete": submitted and not issues,
+                "issues": issues, "lineup": lineup}
+
     def pair_strong(self, pids: List[int], round_no: int) -> bool:
         """Whether a pair counts as "strong" for the overtime bonus.
         Never strong in round 1.

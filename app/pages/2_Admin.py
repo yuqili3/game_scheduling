@@ -1,8 +1,13 @@
-"""Admin desk: group draw, lineup submission, blind draw results,
-absence registration and per-round substitutes.
+"""Admin desk, three tabs:
 
-Every action appends an event; invalid input is rejected by the same
-validation that the replay uses, so the log can never go inconsistent.
+- Group draw: seed-driven random assignment of the 8 teams to G1-G8; the seed
+  is logged with the event, so the draw is reproducible.
+- Lineups: read-only status board — per round and matchup, whether each
+  captain has submitted a lineup, whether it is compliant (issues listed),
+  whether the blind draw is done (with result and seed), and each team's
+  absence/substitute status. Entry itself happens on the captain page.
+- Score correction: override a mis-entered score via a game_corrected
+  compensating event; the original entry stays in the log.
 """
 from __future__ import annotations
 
@@ -13,7 +18,8 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from common import get_store, load_state, team_label  # noqa: E402
+from common import get_store, load_state, names, team_label  # noqa: E402
+from core.draw import group_draw_assign  # noqa: E402
 from core.models import Event  # noqa: E402
 
 st.set_page_config(page_title="Admin", page_icon="🗂️", layout="wide")
@@ -29,111 +35,86 @@ if pin != admin_pin:
     st.stop()
 
 
-def precheck_and_append(type_: str, payload: dict) -> bool:
+def precheck_and_append(type_: str, payload: dict, seed=None) -> bool:
     """Validate against the current state, then persist. Returns success."""
     try:
-        md.apply(Event(seq=0, ts="precheck", type=type_, actor="admin", payload=payload))
-        store.append(type_, "admin", payload)
+        md.apply(Event(seq=0, ts="precheck", type=type_, actor="admin",
+                       payload=payload, seed=seed))
+        store.append(type_, "admin", payload, seed=seed)
         return True
     except ValueError as exc:
         st.error(str(exc))
         return False
 
 
-team_options = {
-    f"T{tid} ({md.base.players[members[0]].name})": tid
-    for tid, members in sorted(md.base.teams.items())
-}
-
-tab_draw, tab_lineup, tab_blind, tab_absence, tab_fix = st.tabs(
-    ["Group draw", "Lineups", "Blind draw", "Absence / substitute", "Score correction"]
+tab_draw, tab_lineups, tab_fix = st.tabs(
+    ["Group draw", "Lineups", "Score correction"]
 )
 
 with tab_draw:
     if md.group_of:
-        st.info(f"Group draw recorded: {md.group_of}")
+        st.info("Group draw recorded: " + "  ·  ".join(
+            f"**{g}** → {team_label(md, g)}" for g in sorted(md.group_of)))
+    st.caption("Enter a random seed (announce it out loud first). The 8 teams "
+               "are shuffled into G1–G8 deterministically — same seed, same draw.")
     with st.form("group_draw"):
-        cols = st.columns(4)
-        picks = {}
-        for i in range(1, 9):
-            with cols[(i - 1) % 4]:
-                picks[f"G{i}"] = st.selectbox(
-                    f"G{i}", list(team_options), index=i - 1, key=f"g{i}"
-                )
-        if st.form_submit_button("Record group draw"):
-            payload = {"groups": {g: team_options[v] for g, v in picks.items()}}
-            if precheck_and_append("group_draw", payload):
-                st.success("Group draw recorded.")
+        seed = st.number_input("Random seed", min_value=0, max_value=10**9, step=1)
+        label = "Redraw groups" if md.group_of else "Draw groups"
+        if st.form_submit_button(label):
+            groups = group_draw_assign(sorted(md.base.teams), int(seed))
+            if precheck_and_append("group_draw", {"groups": groups}, seed=int(seed)):
+                st.success(f"Drawn with seed {int(seed)}.")
                 st.rerun()
 
-if not md.group_of:
-    st.stop()
-
-nodes_ready = [nid for nid in sorted(md.nodes) if md.node_teams(nid) is not None]
-
-with tab_lineup:
-    node = st.selectbox("Matchup", nodes_ready, key="lineup_node")
-    t_a, t_b = md.node_teams(node)
-    tid = st.radio("Team", [t_a, t_b], format_func=lambda t: team_label(
-        md, next(g for g, x in md.group_of.items() if x == t)), horizontal=True)
-    members = md.base.teams[tid]
-    women = [p for p in members if md.base.players[p].gender == "F"]
-    men = [p for p in members if md.base.players[p].gender == "M"]
-    label = lambda p: f"#{p} {md.base.players[p].name}"  # noqa: E731
-    with st.form("lineup"):
-        wd = st.multiselect("WD (2 women)", women, default=women, format_func=label)
-        md1 = st.multiselect("MD1", men, format_func=label, max_selections=2)
-        md2 = st.multiselect("MD2", men, format_func=label, max_selections=2)
-        md3 = st.multiselect("MD3", men, format_func=label, max_selections=2)
-        if st.form_submit_button("Submit lineup"):
-            payload = {"node": node, "team": tid,
-                       "lineup": {"WD": wd, "MD1": md1, "MD2": md2, "MD3": md3}}
-            if precheck_and_append("lineup_submit", payload):
-                st.success("Lineup recorded.")
-                st.rerun()
-
-with tab_blind:
-    node = st.selectbox("Matchup", nodes_ready, key="blind_node")
-    t_a, t_b = md.node_teams(node)
-    tid = st.radio("Team drawn from", [t_a, t_b], format_func=lambda t: team_label(
-        md, next(g for g, x in md.group_of.items() if x == t)),
-        horizontal=True, key="blind_team")
-    members = [p for p in md.base.teams[tid] if not md.base.players[p].is_captain]
-    label = lambda p: f"#{p} {md.base.players[p].name} ({md.base.players[p].gender})"  # noqa: E731
-    with st.form("blind"):
-        picked = st.multiselect("Players drawn", members, format_func=label,
-                                max_selections=2)
-        if st.form_submit_button("Record blind draw"):
-            payload = {"node": node, "team": tid, "players": picked}
-            if precheck_and_append("blind_draw_result", payload):
-                st.success("Blind draw recorded.")
-                st.rerun()
-
-with tab_absence:
-    tid = st.selectbox("Team", list(team_options), key="abs_team")
-    tid = team_options[tid]
-    members = md.base.teams[tid]
-    label = lambda p: f"#{p} {md.base.players[p].name}"  # noqa: E731
-    c1, c2 = st.columns(2)
-    with c1, st.form("absence"):
-        absent = st.selectbox("Absent player", members, format_func=label)
-        if st.form_submit_button("Register absence (switch team to "
-                                 f"{cfg['format']['shorthanded_points']} pts)"):
-            if precheck_and_append("absence_registered",
-                                   {"team": tid, "absent_id": absent}):
-                st.success("Absence registered.")
-                st.rerun()
-    with c2, st.form("substitute"):
-        round_no = st.selectbox("Round", [1, 2, 3])
-        sub = st.selectbox("Substitute (captain's pick, must differ per round)",
-                           members, format_func=label)
-        if st.form_submit_button("Assign substitute"):
-            if precheck_and_append(
-                "substitute_assigned",
-                {"team": tid, "round": round_no, "substitute_id": sub},
-            ):
-                st.success("Substitute recorded.")
-                st.rerun()
+with tab_lineups:
+    if not md.group_of:
+        st.info("Waiting for the group draw.")
+    else:
+        st.caption("Read-only status board. Captains submit lineups, run blind "
+                   "draws and register absences on the Captain page.")
+        for round_no in (1, 2, 3):
+            st.markdown(f"#### Round {round_no}")
+            for nid in sorted(n for n, node in md.nodes.items()
+                              if node.round == round_no):
+                teams = md.node_teams(nid)
+                if teams is None:
+                    st.markdown(f"`{nid}` — opponents not decided yet")
+                    continue
+                gs = md.node_groups(nid)
+                st.markdown(f"`{nid}` **{team_label(md, gs[0])} vs "
+                            f"{team_label(md, gs[1])}**")
+                blind = md.matches.get((nid, "BLIND"))
+                blind_seeds = {
+                    e.payload["team"]: e.seed
+                    for e in store.events()
+                    if e.type == "blind_draw_result" and e.payload.get("node") == nid
+                }
+                for side, tid in zip(("a", "b"), teams):
+                    status = md.lineup_status(nid, tid)
+                    if not status["submitted"]:
+                        lineup_txt = "❌ lineup not submitted"
+                    elif status["complete"]:
+                        lineup_txt = "✅ lineup complete"
+                    else:
+                        lineup_txt = "⚠️ lineup incomplete: " + "; ".join(status["issues"])
+                    bpids = list(getattr(blind, side)) if blind else []
+                    if bpids:
+                        seed_txt = (f", seed {blind_seeds[tid]}"
+                                    if blind_seeds.get(tid) is not None else "")
+                        blind_txt = f"✅ blind: {names(md, bpids)}{seed_txt}"
+                    else:
+                        blind_txt = "❌ blind not drawn"
+                    short = md.shorthanded.get(tid)
+                    if short:
+                        subs = ", ".join(
+                            f"R{r}: {md.base.players[p].name}"
+                            for r, p in sorted(short["substitutes"].items())
+                        ) or "no substitute assigned"
+                        absent_txt = (f"🚑 absent {md.base.players[short['absent_id']].name} "
+                                      f"({subs}, {cfg['format']['shorthanded_points']}-pt scoring)")
+                    else:
+                        absent_txt = "full squad"
+                    st.markdown(f"- Team {tid}: {lineup_txt} · {blind_txt} · {absent_txt}")
 
 with tab_fix:
     st.caption("Override a mis-entered score. The original entry stays in the "

@@ -37,6 +37,14 @@ def draw_teams(players: Dict[int, Player], num_teams: int, seed: int) -> Dict[in
     return teams
 
 
+def group_draw_assign(team_ids: List[int], seed: int) -> Dict[str, int]:
+    """Seed-determined group draw: shuffle the teams into G1..Gn."""
+    rng = random.Random(seed)
+    ids = sorted(team_ids)
+    rng.shuffle(ids)
+    return {f"G{i + 1}": tid for i, tid in enumerate(ids)}
+
+
 def blind_draw_pick(
     category: str, females: List[int], males: List[int], seed: int
 ) -> List[int]:

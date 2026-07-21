@@ -8,7 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from core import rules
-from core.draw import blind_draw_pick, draw_teams
+from core.draw import blind_draw_pick, draw_teams, group_draw_assign
 from core.io_utils import load_config, load_players
 from core.matchday import MatchDayState, replay_matchday
 from core.models import Event, TournamentState
@@ -152,6 +152,53 @@ class TestMatchDay(unittest.TestCase):
         md2 = replay_matchday(base_state(), evs, CFG)
         self.assertEqual(md2.points_for("R1-1"), CFG["format"]["shorthanded_points"])
         self.assertEqual(md2.points_for("R1-3"), CFG["format"]["points_per_game"])
+
+
+class TestGroupDrawAssign(unittest.TestCase):
+    def test_deterministic_and_covering(self):
+        teams = list(range(1, 9))
+        g1 = group_draw_assign(teams, seed=7)
+        self.assertEqual(g1, group_draw_assign(teams, seed=7))
+        self.assertEqual(sorted(g1), [f"G{i}" for i in range(1, 9)])
+        self.assertEqual(sorted(g1.values()), teams)
+        self.assertNotEqual(g1, group_draw_assign(teams, seed=8))
+
+
+class TestLineupStatus(unittest.TestCase):
+    def test_states(self):
+        md = md_with_groups()
+        tid = md.node_teams("R1-1")[0]
+        s = md.lineup_status("R1-1", tid)
+        self.assertFalse(s["submitted"])
+        # partial lineup: MD3 missing
+        members = md.base.teams[tid]
+        women = [p for p in members if md.base.players[p].gender == "F"]
+        men = [p for p in members
+               if md.base.players[p].gender == "M" and not md.base.players[p].is_captain]
+        md.apply(ev(2, "lineup_submit", {
+            "node": "R1-1", "team": tid,
+            "lineup": {"WD": women, "MD1": men[:2], "MD2": men[2:4]}}))
+        s = md.lineup_status("R1-1", tid)
+        self.assertTrue(s["submitted"])
+        self.assertFalse(s["complete"])
+        self.assertTrue(any("MD3" in i for i in s["issues"]))
+        cap = [p for p in members if md.base.players[p].is_captain]
+        md.apply(ev(3, "lineup_submit", {
+            "node": "R1-1", "team": tid, "lineup": {"MD3": [men[4], cap[0]]}}))
+        s = md.lineup_status("R1-1", tid)
+        self.assertTrue(s["complete"])
+        self.assertEqual(s["issues"], [])
+
+
+class TestConsolationNaming(unittest.TestCase):
+    def test_no_loser_nodes(self):
+        nodes = rules.bracket()
+        self.assertIn("R2-CU", nodes)  # consolation-upper (C = consolation, U/L = bank)
+        self.assertIn("R2-CL", nodes)
+        self.assertNotIn("R2-LU", nodes)
+        self.assertNotIn("R2-LL", nodes)
+        self.assertTrue(all("loser" not in node.tag for node in nodes.values()))
+        self.assertEqual(sum("consolation" in node.tag for node in nodes.values()), 2)
 
 
 class TestBlindDraw(unittest.TestCase):

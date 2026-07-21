@@ -79,6 +79,46 @@ def court_status(
     return "idle", upcoming[0] if upcoming else None
 
 
+STATUS_LABEL = {
+    "idle": "Idle",
+    "warmup": "Warm-up",
+    "game1": "Game 1",
+    "game2": "Game 2",
+    "game3": "Game 3",
+}
+
+
+def render_court_grid(cfg: dict, md: MatchDayState, slots: List[Slot], now: float) -> None:
+    """The color-coded court grid, shared by the spectator and score-entry pages."""
+    colors = cfg["visual"]["court_colors"]
+    total = cfg["courts"]["total"]
+    for row_start in range(1, total + 1, 5):
+        cols = st.columns(5)
+        for i, court in enumerate(range(row_start, min(row_start + 5, total + 1))):
+            status, slot = court_status(md, slots, court, now)
+            color = colors[status]
+            with cols[i]:
+                if slot is not None:
+                    d = match_desc(md, slot)
+                    when = (
+                        "in play"
+                        if status.startswith("game")
+                        else f"next {fmt_clock(slot.start, cfg)}"
+                    )
+                    body = (
+                        f"<b>{d['matchup']}</b><br>{d['match']} · game {d['game']} · "
+                        f"to {d['points']} pts<br>{d['players']}<br>score: {d['score']}<br>{when}"
+                    )
+                else:
+                    body = "no matches planned"
+                st.markdown(
+                    f"""<div style="background:{color};border-radius:10px;padding:10px;
+                    min-height:150px;color:#111;font-size:0.82rem;line-height:1.35">
+                    <b>Court {court}</b> — {STATUS_LABEL[status]}<br>{body}</div>""",
+                    unsafe_allow_html=True,
+                )
+
+
 def match_desc(md: MatchDayState, slot: Slot) -> Dict[str, str]:
     """Displayable details of the match a slot belongs to."""
     gs = md.node_groups(slot.node)
