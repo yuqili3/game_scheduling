@@ -21,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from common import (  # noqa: E402
     court_status,
+    env_badge,
     fmt_clock,
     get_store,
     load_state,
@@ -32,6 +33,7 @@ from core.models import Event  # noqa: E402
 
 st.set_page_config(page_title="Score Entry", page_icon="✍️", layout="wide")
 st.title("✍️ Score Entry")
+env_badge()
 
 cfg, md, slots, now = load_state()
 volunteers = {v["name"]: v for v in cfg["broadcast"]["volunteers"]}

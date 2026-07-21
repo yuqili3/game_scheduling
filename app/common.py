@@ -22,6 +22,13 @@ def get_store() -> EventStore:
     return EventStore()
 
 
+def env_badge() -> None:
+    """Make the active data environment unmistakable on every page."""
+    if io_utils.ENV != "prod":
+        st.warning(f"SIMULATION environment (GS_ENV={io_utils.ENV}) — "
+                   "not live tournament data", icon="🧪")
+
+
 def load_state() -> Tuple[dict, MatchDayState, List[Slot], float]:
     """Config + match-day state + current plan + minutes since session start."""
     cfg = io_utils.load_config()

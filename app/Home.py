@@ -12,6 +12,7 @@ import streamlit as st
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from common import (  # noqa: E402
+    env_badge,
     fmt_clock,
     load_state,
     match_desc,
@@ -105,6 +106,7 @@ def live_view() -> None:
 
 
 st.title(f"🏸 {cfg['event']['name']} — Live")
+env_badge()
 if not md.group_of:
     st.info("Waiting for the group draw (admin page).")
 live_view()

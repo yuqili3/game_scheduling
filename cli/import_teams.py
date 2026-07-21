@@ -28,7 +28,12 @@ def main() -> None:
     ap.add_argument("--roster", default=str(io_utils.REPO_ROOT / "players.csv"))
     ap.add_argument("--actor", default="organizer")
     ap.add_argument("--date", default=None)
+    ap.add_argument("--env", default=None,
+                    help="data environment under data/ (default: GS_ENV or prod)")
     args = ap.parse_args()
+    if args.env:
+        io_utils.set_env(args.env)
+
 
     cfg = io_utils.load_config()
     players = io_utils.load_players()

@@ -24,7 +24,12 @@ def main() -> None:
                     help="random seed (logged with the event, reproducible)")
     ap.add_argument("--actor", default="organizer")
     ap.add_argument("--date", default=None, help="snapshot date YYYYMMDD, default today")
+    ap.add_argument("--env", default=None,
+                    help="data environment under data/ (default: GS_ENV or prod)")
     args = ap.parse_args()
+    if args.env:
+        io_utils.set_env(args.env)
+
 
     cfg = io_utils.load_config()
     players = io_utils.load_players()

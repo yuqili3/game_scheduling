@@ -148,11 +148,12 @@ def plan(md: MatchDayState, now: float = 0.0) -> List[Slot]:
     total = cfg["courts"]["total"]
     rest = float(cfg["duration"]["rest_minutes"])
     changeover = float(cfg["duration"]["changeover_minutes"])
-    banks = {
-        0: list(range(1, per_bank + 1)),
-        1: list(range(per_bank + 1, total + 1)),
-    }
-    court_free: Dict[int, float] = {c: now for c in range(1, total + 1)}
+    # courts are chunked into banks of per_bank; with fewer courts than two
+    # full banks, logical banks fold onto the same courts (full support for
+    # tiny venues, 3-6 courts, is roadmap work — see spec)
+    courts = list(range(1, total + 1))
+    bank_list = [courts[i : i + per_bank] for i in range(0, total, per_bank)] or [courts]
+    court_free: Dict[int, float] = {c: now for c in courts}
     slots_out: List[Slot] = []
     node_end: Dict[str, float] = {}
 
@@ -176,7 +177,7 @@ def plan(md: MatchDayState, now: float = 0.0) -> List[Slot]:
                 n for n, node in md.nodes.items()
                 if node.round == round_no and node.bank == bank_id
             )
-            bank = banks[bank_id]
+            bank = bank_list[bank_id % len(bank_list)]
             units: List[_Unit] = []
             for order, nid in enumerate(nids):
                 if md.node_finished(nid):

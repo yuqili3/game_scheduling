@@ -21,11 +21,12 @@
 ## 目录结构
 
 ```
-config.yaml              # 全部超参数(英文键名,中文注释): 人员/赛制/场地/时长/可视化/志愿者
-data/
+data/<env>/              # 每个环境一个自包含目录: prod = 正式赛事, sim = 彩排/模拟
+  config.yaml            # 全部超参数(英文键名,中文注释): 人员/赛制/场地/时长/可视化/志愿者
   players_female.csv     # 初始人员表·女(序号 1-16)
   players_male.csv       # 初始人员表·男(序号 17-64,其中 17-24 为八名队长)
   events.jsonl           # 事件日志(唯一事实来源)
+  tournament.db          # SQLite 并发写入层(不入 git,可由 jsonl 重建)
   teams_YYYYMMDD*.csv    # 分队快照(每次抽签/退赛后导出,带日期戳)
 core/                    # 纯函数层(不碰文件/时钟/全局随机数)
   models.py              # Player / Event / TournamentState
@@ -44,6 +45,32 @@ app/                     # Streamlit 直播 App
   pages/3_Captain.py     # 队长页: 名单提交 + 种子盲抽 + 缺席/顶替(每队独立 PIN)
 tests/                   # 单元测试: python3 -m unittest discover -s tests
 ```
+
+## 环境分离(sim / prod)
+
+数据按环境隔离在 `data/<env>/` 下,每个环境自带 config、名单、事件日志与数据库:
+
+- **prod**:正式赛事数据。CLI 与 App 的默认环境
+- **sim**:彩排与模拟沙盒,随便折腾,不碰正式数据
+
+选择方式:环境变量 `GS_ENV=sim`,或 CLI 的 `--env sim` 参数。App 在非 prod
+环境时每个页面顶部都会显示 🧪 SIMULATION 警示条,防止混淆。彩排驱动器
+`cli/rehearse.py` 默认跑在 sim,并且拒绝在 prod 运行(除非 `--force-prod`)。
+
+未来复用同一代码办混双/女双/男双专项赛时,为每个赛事建一个新的环境目录
+(自带人员表与赛制 config)即可。
+
+### 彩排(比赛日预演)
+
+```bash
+GS_ENV=sim streamlit run app/Home.py     # 终端 1: 起 app(页面带 SIMULATION 警示)
+python3 cli/rehearse.py --interval 4     # 终端 2: 每 4 秒喂入一个事件,~12 分钟走完全程
+```
+
+驱动器按顺序执行:种子对阵抽签 → 各队名单 + 种子盲抽 → 逐局比分(含场地号与
+分管志愿者署名)→ 三轮打满出排名。整场彩排由 `--seed` 决定,可完整复现。
+浏览器开 `localhost:8501` 观看;期间可用志愿者/队长/Admin 页手动操作,与驱动器
+事件并发交织,正好检验并发写入。
 
 ## 安装
 

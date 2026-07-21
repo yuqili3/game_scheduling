@@ -17,16 +17,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-from .io_utils import DATA_DIR, EVENTS_PATH, read_events
+from . import io_utils
+from .io_utils import read_events
 from .models import Event
-
-DB_PATH = DATA_DIR / "tournament.db"
 
 
 class EventStore:
-    def __init__(self, db_path: Path = DB_PATH, jsonl_path: Path = EVENTS_PATH):
-        self.db_path = db_path
-        self.jsonl_path = jsonl_path
+    def __init__(self, db_path: Optional[Path] = None, jsonl_path: Optional[Path] = None):
+        self.db_path = db_path or io_utils.data_dir() / "tournament.db"
+        self.jsonl_path = jsonl_path or io_utils.events_path()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
         self.sync_from_jsonl()

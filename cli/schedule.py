@@ -28,7 +28,12 @@ def fmt_t(minutes: float, start: str) -> str:
 def main() -> None:
     ap = argparse.ArgumentParser(description="match-day schedule")
     ap.add_argument("--now", type=float, default=0.0, help="minutes since session start")
+    ap.add_argument("--env", default=None,
+                    help="data environment under data/ (default: GS_ENV or prod)")
     args = ap.parse_args()
+    if args.env:
+        io_utils.set_env(args.env)
+
 
     cfg = io_utils.load_config()
     session_start = cfg["broadcast"].get("session_start", "17:10")

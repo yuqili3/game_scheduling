@@ -1,0 +1,73 @@
+event:
+  name: "2026 Badminton Melee"
+  date: "2026-07-19"
+
+players:
+  num_female: 16          # ids 1-16
+  num_male: 48            # ids 17-64 (17-24 are captains)
+  num_teams: 8
+  females_per_team: 2
+  males_per_team: 6       # including captain
+  captain_gender: M
+
+format:
+  num_rounds: 3
+  matches_per_round: 5    # WD x1 + MD x3 + blind x1
+  matches_to_win: 3       # best of 5 matches
+  points_per_game: 21
+  shorthanded_points: 15  # a short-handed team plays all its matches at this scoring
+  games_per_match: 3      # best of 3 games
+  blind_match_types: [XD, XD, MD]   # by round
+
+courts:
+  total: 10
+  per_bank: 5             # each pair of matchups shares one bank of courts
+
+duration:                 # minutes, per game at 21 points
+  wd_game_minutes: 10
+  md_game_minutes: 13
+  xd_game_minutes: 13
+  strong_pair_bonus: 3            # never applied in round 1
+  margin_per_game_threshold: 6    # avg winning margin per game >= 6 -> strong pair
+  margin_per_match_threshold: 12  # or total match margin >= 12 -> strong pair
+  rest_minutes: 5                 # min rest for a player between consecutive matches
+  changeover_minutes: 2
+  scale_by_points: true           # 15-point game time = base * 15/21
+
+visual:
+  court_colors:
+    idle: "#4CAF50"       # green
+    warmup: "#FFC107"     # yellow
+    game1: "#FF8A80"      # light red
+    game2: "#D32F2F"      # dark red
+    game3: "#AD1457"      # purple red
+
+broadcast:
+  refresh_seconds: 5
+  session_start: "17:10"  # local time of first serve, used for display
+  admin_pin: "0719"       # admin desk page
+  captain_pins:           # per team id, unlocks the captain lineup page
+    1: "9001"
+    2: "9002"
+    3: "9003"
+    4: "9004"
+    5: "9005"
+    6: "9006"
+    7: "9007"
+    8: "9008"
+  volunteers:
+    - name: VolunteerA
+      pin: "1111"
+      courts: [1, 2, 3]
+    - name: VolunteerB
+      pin: "2222"
+      courts: [4, 5]
+    - name: VolunteerC
+      pin: "3333"
+      courts: [6, 7, 8]
+    - name: VolunteerD
+      pin: "4444"
+      courts: [9, 10]
+
+random:
+  default_seed: 20260719

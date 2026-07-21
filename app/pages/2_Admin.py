@@ -18,12 +18,13 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from common import get_store, load_state, names, team_label  # noqa: E402
+from common import env_badge, get_store, load_state, names, team_label  # noqa: E402
 from core.draw import group_draw_assign  # noqa: E402
 from core.models import Event  # noqa: E402
 
 st.set_page_config(page_title="Admin", page_icon="🗂️", layout="wide")
 st.title("🗂️ Admin Desk")
+env_badge()
 
 cfg, md, slots, now = load_state()
 store = get_store()

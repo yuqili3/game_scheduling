@@ -1,32 +1,60 @@
 """IO layer (impure): config / roster / event log / CSV snapshot export.
 
 Everything else in core stays pure; file and clock access live here and in cli/.
+
+Environments: data lives under data/<env>/ — one self-contained directory per
+tournament (config.yaml, players_*.csv, events.jsonl, tournament.db,
+snapshots). The environment is selected by the GS_ENV environment variable
+(default "prod"); "sim" is the rehearsal/simulation sandbox. This keeps
+simulation data strictly apart from production and lets the same codebase
+host future events (XD/WD/MD-only tournaments) as separate env directories.
 """
 from __future__ import annotations
 
 import csv
 import json
+import os
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import yaml
 
 from .models import Event, Player, TournamentState
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DATA_DIR = REPO_ROOT / "data"
-EVENTS_PATH = DATA_DIR / "events.jsonl"
+DATA_ROOT = REPO_ROOT / "data"
+
+ENV = os.environ.get("GS_ENV", "prod")
 
 
-def load_config(path: Path = REPO_ROOT / "config.yaml") -> dict:
-    with open(path, encoding="utf-8") as f:
+def set_env(env: str) -> None:
+    """Switch the active data environment (e.g. from a CLI --env flag)."""
+    global ENV
+    ENV = env
+
+
+def data_dir() -> Path:
+    return DATA_ROOT / ENV
+
+
+def events_path() -> Path:
+    return data_dir() / "events.jsonl"
+
+
+def config_path() -> Path:
+    return data_dir() / "config.yaml"
+
+
+def load_config(path: Optional[Path] = None) -> dict:
+    with open(path or config_path(), encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
-def load_players(data_dir: Path = DATA_DIR) -> Dict[int, Player]:
+def load_players(directory: Optional[Path] = None) -> Dict[int, Player]:
+    directory = directory or data_dir()
     players: Dict[int, Player] = {}
     for name in ("players_female.csv", "players_male.csv"):
-        with open(data_dir / name, encoding="utf-8") as f:
+        with open(directory / name, encoding="utf-8") as f:
             for row in csv.DictReader(f):
                 p = Player(
                     id=int(row["id"]),
@@ -38,7 +66,8 @@ def load_players(data_dir: Path = DATA_DIR) -> Dict[int, Player]:
     return players
 
 
-def read_events(path: Path = EVENTS_PATH) -> List[Event]:
+def read_events(path: Optional[Path] = None) -> List[Event]:
+    path = path or events_path()
     if not path.exists():
         return []
     events = []
@@ -50,26 +79,28 @@ def read_events(path: Path = EVENTS_PATH) -> List[Event]:
     return events
 
 
-def append_event(event: Event, path: Path = EVENTS_PATH) -> None:
+def append_event(event: Event, path: Optional[Path] = None) -> None:
+    path = path or events_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "a", encoding="utf-8") as f:
         f.write(json.dumps(event.to_dict(), ensure_ascii=False) + "\n")
 
 
-def next_seq(path: Path = EVENTS_PATH) -> int:
-    events = read_events(path)
+def next_seq(path: Optional[Path] = None) -> int:
+    events = read_events(path or events_path())
     return (events[-1].seq + 1) if events else 1
 
 
-def snapshot_path(date_str: str, data_dir: Path = DATA_DIR) -> Path:
+def snapshot_path(date_str: str, directory: Optional[Path] = None) -> Path:
     """teams_YYYYMMDD.csv; later snapshots on the same day get _2/_3 suffixes."""
-    base = data_dir / f"teams_{date_str}.csv"
+    directory = directory or data_dir()
+    base = directory / f"teams_{date_str}.csv"
     if not base.exists():
         return base
     k = 2
-    while (data_dir / f"teams_{date_str}_{k}.csv").exists():
+    while (directory / f"teams_{date_str}_{k}.csv").exists():
         k += 1
-    return data_dir / f"teams_{date_str}_{k}.csv"
+    return directory / f"teams_{date_str}_{k}.csv"
 
 
 def export_teams_csv(state: TournamentState, out_path: Path) -> None:
