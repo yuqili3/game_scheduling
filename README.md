@@ -23,8 +23,8 @@
 ```
 data/<env>/              # 每个环境一个自包含目录: prod = 正式赛事, sim = 彩排/模拟
   config.yaml            # 全部超参数(英文键名,中文注释): 人员/赛制/场地/时长/可视化/志愿者
-  players_female.csv     # 初始人员表·女(序号 1-16)
-  players_male.csv       # 初始人员表·男(序号 17-64,其中 17-24 为八名队长)
+  players_female.csv     # 初始人员表·女(序号 1-16;仓库内为 celebrity 占位姓名)
+  players_male.csv       # 初始人员表·男(17-64,其中 17-24 为八名队长;同为占位姓名)
   events.jsonl           # 事件日志(唯一事实来源)
   tournament.db          # SQLite 并发写入层(不入 git,可由 jsonl 重建)
   teams_YYYYMMDD*.csv    # 分队快照(每次抽签/退赛后导出,带日期戳)
@@ -92,6 +92,9 @@ pip3 install -r requirements.txt   # 目前仅 pyyaml;M3 展示端需再装 stre
 - **广播**: 每名志愿者的姓名、PIN、分管场地
 
 ### 阶段 1:报名结束,建立初始人员表
+
+> 隐私说明:仓库内的所有人员表使用 **celebrity 占位姓名**,性别与队长结构和
+> 真实名单一一对应;真实姓名只在线下保存,比赛日本地部署时替换即可。
 
 `data/players_female.csv`(1–16)与 `data/players_male.csv`(17–64)。
 只固定 8 名男队长(`是否队长=true`),队伍归属由下一步产生。
