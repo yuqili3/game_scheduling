@@ -116,8 +116,8 @@ def main() -> None:
                                    "MD3": [men[4], cap[0]]}})
                     pause(f"round {round_no} {nid}: team {tid} lineup submitted")
                 blind = md.matches.get((nid, "BLIND"))
-                opp_side = "b" if md.node_teams(nid)[0] == opp else "a"
-                if not (blind and getattr(blind, "a" if opp_side == "a" else "b")):
+                opp_side = "a" if md.node_teams(nid)[0] == opp else "b"
+                if not (blind and getattr(blind, opp_side)):
                     category = cfg["format"]["blind_match_types"][round_no - 1]
                     fem, mal = md.blind_eligible(nid, opp)
                     draw_seed = rng.randrange(10**6)
@@ -129,42 +129,54 @@ def main() -> None:
                     pause(f"round {round_no} {nid}: captain T{tid} drew T{opp}'s "
                           f"blind pair (seed {draw_seed})")
 
-        # play every game of the round
-        playing = True
-        while playing:
+        # play the round: one game per pending match per sweep, so matches run
+        # in parallel across courts like the real event
+        while True:
             base, md = rebuild(store, players, cfg)
-            playing = False
+            pending = []
             for nid in sorted(n for n, node in md.nodes.items()
                               if node.round == round_no):
                 if md.node_teams(nid) is None or md.node_finished(nid):
                     continue
                 for slot in rules.MATCH_SLOTS:
                     m = md.matches.get((nid, slot))
-                    if m is None or m.winner() is not None:
+                    if m is None or not m.a or not m.b or m.winner() is not None:
                         continue
-                    playing = True
-                    points = md.points_for(nid)
-                    loser_pts = rng.randrange(points // 3, points - 1)
-                    a_wins = rng.random() < 0.5
-                    score = [points, loser_pts] if a_wins else [loser_pts, points]
-                    game_no = len(m.games) + 1
-                    elapsed = (time.time() - start) / 60.0
-                    court = None
-                    for s in plan(md, now=elapsed):
-                        if s.node == nid and s.match_slot == slot and s.game == game_no:
-                            court = s.court
-                            break
-                    payload = {"node": nid, "slot": slot, "game": game_no,
-                               "score": score}
-                    if court:
-                        payload["court"] = court
-                    actor = volunteer_for_court(cfg, court) if court else "VolunteerA"
-                    store.append("game_finished", actor, payload)
-                    pause(f"round {round_no} {nid} {slot} game {game_no}: "
-                          f"{score[0]}:{score[1]} (court {court})")
-                    break  # rebuild state, move to the next pending game
-                if playing:
-                    break
+                    pending.append((nid, slot))
+            if not pending:
+                break
+            for nid, slot in pending:
+                base, md = rebuild(store, players, cfg)
+                m = md.matches[(nid, slot)]
+                if m.winner() is not None:
+                    continue
+                elapsed = (time.time() - start) / 60.0
+                if (nid, slot) in md.started:
+                    court = md.started[(nid, slot)]["court"]
+                else:
+                    game_next = len(m.games) + 1
+                    court = next(
+                        (s.court for s in plan(md, now=elapsed)
+                         if s.node == nid and s.match_slot == slot
+                         and s.game == game_next),
+                        None,
+                    )
+                    if court is None or md.started_on_court(court) is not None:
+                        continue  # no free court yet; retry next sweep
+                    store.append("match_started", "admin",
+                                 {"node": nid, "slot": slot, "court": court})
+                    pause(f"round {round_no} {nid} {slot}: host confirmed "
+                          f"start on court {court}")
+                points = md.points_for(nid)
+                loser_pts = rng.randrange(points // 3, points - 1)
+                a_wins = rng.random() < 0.5
+                score = [points, loser_pts] if a_wins else [loser_pts, points]
+                game_no = len(m.games) + 1
+                store.append("game_finished", volunteer_for_court(cfg, court),
+                             {"node": nid, "slot": slot, "game": game_no,
+                              "score": score, "court": court})
+                pause(f"round {round_no} {nid} {slot} game {game_no}: "
+                      f"{score[0]}:{score[1]} (court {court})")
         print(f"=== round {round_no} finished ===")
 
     base, md = rebuild(store, players, cfg)

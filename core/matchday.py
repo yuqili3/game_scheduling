@@ -38,6 +38,8 @@ class MatchDayState:
     matches: Dict[Tuple[str, str], Match] = field(default_factory=dict)
     # short-handed teams: team id -> {"absent_id": pid, "substitutes": {round: pid}}
     shorthanded: Dict[int, dict] = field(default_factory=dict)
+    # host-confirmed matches: (node_id, slot) -> {"court": int}
+    started: Dict[Tuple[str, str], dict] = field(default_factory=dict)
     changelog: List[str] = field(default_factory=list)
 
     # ---------- queries ----------
@@ -148,6 +150,16 @@ class MatchDayState:
         )
         return females, males
 
+    def started_on_court(self, court: int) -> Optional[Tuple[str, str]]:
+        """The host-confirmed, not-yet-decided match occupying a court, if any."""
+        for (nid, slot), info in self.started.items():
+            if info["court"] != court:
+                continue
+            m = self.matches.get((nid, slot))
+            if m is not None and m.winner() is None:
+                return (nid, slot)
+        return None
+
     def lineup_status(self, node_id: str, tid: int) -> dict:
         """Submission/compliance status of a team's lineup for a matchup.
 
@@ -211,6 +223,7 @@ class MatchDayState:
             "group_draw": self._group_draw,
             "lineup_submit": self._lineup_submit,
             "blind_draw_result": self._blind_draw_result,
+            "match_started": self._match_started,
             "game_finished": self._game_finished,
             "game_corrected": self._game_corrected,
             "absence_registered": self._absence_registered,
@@ -300,10 +313,43 @@ class MatchDayState:
         setattr(m, side, pids)
         self.changelog.append(f"[{ev.ts}] {node_id} team {tid} blind draw: {pids}")
 
+    def _match_started(self, ev: Event) -> None:
+        """Host confirmation: players were announced and walked onto the court.
+        From here the match is officially in play and awaits volunteer scores."""
+        p = ev.payload
+        node_id, slot, court = p["node"], p["slot"], int(p["court"])
+        if slot not in rules.MATCH_SLOTS:
+            raise ValueError(f"unknown match slot: {slot}")
+        if self.node_teams(node_id) is None:
+            raise ValueError(f"{node_id} sides are not determined yet")
+        m = self.matches.get((node_id, slot))
+        if m is None or not m.a or not m.b:
+            raise ValueError(f"{node_id} {slot}: lineup/blind players not recorded yet")
+        if m.winner() is not None:
+            raise ValueError(f"{node_id} {slot} is already decided")
+        if (node_id, slot) in self.started:
+            raise ValueError(f"{node_id} {slot} was already confirmed started")
+        total = self.cfg["courts"]["total"]
+        if not 1 <= court <= total:
+            raise ValueError(f"court {court} out of range 1..{total}")
+        busy = self.started_on_court(court)
+        if busy is not None:
+            raise ValueError(
+                f"court {court} still has {busy[0]} {busy[1]} in play — "
+                "wait for the volunteer to finish scoring it"
+            )
+        self.started[(node_id, slot)] = {"court": court}
+        self.changelog.append(f"[{ev.ts}] {node_id} {slot} started on court {court}")
+
     def _game_finished(self, ev: Event) -> None:
         p = ev.payload
         node_id, slot = p["node"], p["slot"]
         m = self._match(node_id, slot)
+        if not m.a or not m.b:
+            raise ValueError(
+                f"{node_id} {slot}: both sides must have recorded players "
+                "(lineup/blind draw) before scores can be entered"
+            )
         game_no = int(p["game"])
         if game_no != len(m.games) + 1:
             raise ValueError(

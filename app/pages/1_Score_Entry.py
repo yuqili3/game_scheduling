@@ -119,6 +119,11 @@ for court in volunteers[vol_name]["courts"]:
     if m and (not m.a or not m.b):
         st.warning("Lineup/blind draw not recorded yet — ask the admin desk.")
 
+    if active_key not in md.started:
+        st.info("⏳ Waiting for the host to announce this match and confirm the "
+                "players are on court (Admin → Live). Score entry unlocks then.")
+        continue
+
     with st.form(f"score_{court}_{slot.node}_{slot.match_slot}_{next_game}",
                  clear_on_submit=True):
         c1, c2 = st.columns(2)

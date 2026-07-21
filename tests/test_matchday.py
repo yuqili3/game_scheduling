@@ -243,6 +243,52 @@ class TestBlindDraw(unittest.TestCase):
                         {"node": "R2-WU", "team": 1, "players": repeat}))
 
 
+class TestMatchStarted(unittest.TestCase):
+    def _md_ready(self):
+        md = md_with_groups()
+        evs = [group_draw_event()] + lineup_events(md, "R1-1", 2)
+        return replay_matchday(base_state(), evs, CFG)
+
+    def test_start_court_busy_and_double_start(self):
+        md = self._md_ready()
+        md.apply(ev(20, "match_started", {"node": "R1-1", "slot": "WD", "court": 1}))
+        self.assertEqual(md.started_on_court(1), ("R1-1", "WD"))
+        with self.assertRaises(ValueError):  # court busy
+            md.apply(ev(21, "match_started", {"node": "R1-1", "slot": "MD1", "court": 1}))
+        with self.assertRaises(ValueError):  # double start
+            md.apply(ev(22, "match_started", {"node": "R1-1", "slot": "WD", "court": 2}))
+
+    def test_requires_recorded_players(self):
+        md = md_with_groups()  # no lineups submitted
+        with self.assertRaises(ValueError):
+            md.apply(ev(2, "match_started", {"node": "R1-1", "slot": "WD", "court": 1}))
+
+    def test_court_frees_once_match_decided(self):
+        md = self._md_ready()
+        md.apply(ev(20, "match_started", {"node": "R1-1", "slot": "WD", "court": 1}))
+        for g, score in enumerate([(21, 10), (21, 12)], start=1):
+            md.apply(ev(20 + g, "game_finished",
+                        {"node": "R1-1", "slot": "WD", "game": g, "score": list(score)}))
+        self.assertIsNone(md.started_on_court(1))
+        md.apply(ev(30, "match_started", {"node": "R1-1", "slot": "MD1", "court": 1}))
+
+    def test_scheduler_pins_started_match_to_court(self):
+        md = self._md_ready()
+        md.apply(ev(20, "match_started", {"node": "R1-1", "slot": "WD", "court": 4}))
+        slots = plan(md, now=10)
+        wd = [s for s in slots if s.node == "R1-1" and s.match_slot == "WD"]
+        self.assertTrue(wd)
+        self.assertTrue(all(s.court == 4 for s in wd))
+        self.assertAlmostEqual(min(s.start for s in wd), 10.0)
+        # the blind match still waits for WD's first two games + rest
+        blind = [s for s in slots if s.node == "R1-1" and s.match_slot == "BLIND"]
+        wd_main_end = max(s.end for s in wd if s.game <= 2)
+        self.assertGreaterEqual(
+            min(b.start for b in blind),
+            wd_main_end + CFG["duration"]["rest_minutes"] - 1e-9,
+        )
+
+
 class TestCorrection(unittest.TestCase):
     def _md_with_games(self, games):
         md = md_with_groups()

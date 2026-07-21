@@ -73,7 +73,20 @@ def team_label(md: MatchDayState, g: str) -> str:
 def court_status(
     md: MatchDayState, slots: List[Slot], court: int, now: float, warmup_lookahead: float = 10.0
 ) -> Tuple[str, Optional[Slot]]:
-    """Returns (status, slot) where status is idle/warmup/game1/game2/game3."""
+    """Returns (status, slot) where status is idle/warmup/game1/game2/game3.
+
+    A host-confirmed (match_started) match in play on this court takes
+    priority over the clock-derived plan."""
+    from core.scheduler import game_minutes
+
+    confirmed = md.started_on_court(court)
+    if confirmed is not None:
+        nid, mslot = confirmed
+        m = md.matches.get((nid, mslot))
+        game_no = len(m.games) + 1 if m else 1
+        dur = game_minutes(md, nid, mslot)
+        s = Slot(now, now + dur, court, nid, mslot, game_no, "in play (confirmed)")
+        return f"game{min(game_no, 3)}", s
     active = [s for s in slots if s.court == court and s.start <= now < s.end]
     if active:
         s = active[0]
@@ -124,6 +137,67 @@ def render_court_grid(cfg: dict, md: MatchDayState, slots: List[Slot], now: floa
                     <b>Court {court}</b> — {STATUS_LABEL[status]}<br>{body}</div>""",
                     unsafe_allow_html=True,
                 )
+
+
+def render_bracket(cfg: dict, md: MatchDayState, slots: List[Slot]) -> None:
+    st.subheader("Bracket")
+    winners = md.node_winners()
+    cols = st.columns(3)
+    for r, col in zip((1, 2, 3), cols):
+        with col:
+            st.markdown(f"**Round {r}**")
+            for nid in sorted(n for n in md.nodes if md.nodes[n].round == r):
+                gs = md.node_groups(nid)
+                desc = (f"{team_label(md, gs[0])} vs {team_label(md, gs[1])}"
+                        if gs else "TBD")
+                if nid in winners:
+                    status = f"✅ winner {winners[nid]}"
+                elif any(k[0] == nid and m.games for k, m in md.matches.items()):
+                    status = "🟠 in progress"
+                else:
+                    starts = [s.start for s in slots if s.node == nid]
+                    status = f"est. {fmt_clock(min(starts), cfg)}" if starts else "pending"
+                st.markdown(f"- `{nid}` [{md.nodes[nid].tag}] {desc} — {status}")
+
+
+def render_ranking(md: MatchDayState) -> None:
+    from core import rules
+
+    ranking = rules.final_ranking(md.node_winners(), md.nodes)
+    if ranking:
+        st.subheader("Ranking")
+        st.table(
+            [{"place": p, "group": ranking[p], "team": team_label(md, ranking[p])}
+             for p in sorted(ranking)]
+        )
+
+
+def render_blind_board(md: MatchDayState) -> None:
+    blind = [(nid, m) for (nid, s), m in md.matches.items()
+             if s == "BLIND" and (m.a or m.b)]
+    if blind:
+        st.subheader("Blind draw results")
+        for nid, m in sorted(blind):
+            gs = md.node_groups(nid)
+            a = ", ".join(md.base.players[p].name for p in m.a) or "TBD"
+            b = ", ".join(md.base.players[p].name for p in m.b) or "TBD"
+            st.markdown(f"- `{nid}` ({m.category}): {gs[0] if gs else '?'}: {a} — "
+                        f"{gs[1] if gs else '?'}: {b}")
+
+
+def render_next_up(cfg: dict, md: MatchDayState, slots: List[Slot], now: float,
+                   limit: int = 12) -> None:
+    st.subheader("Next up")
+    upcoming = [s for s in slots if s.start >= now][:limit]
+    if upcoming:
+        st.table(
+            [{"time": fmt_clock(s.start, cfg), "court": s.court, "node": s.node,
+              "match": s.match_slot, "game": s.game,
+              "players": match_desc(md, s)["players"]}
+             for s in upcoming]
+        )
+    else:
+        st.write("Nothing left to play 🎉")
 
 
 def match_desc(md: MatchDayState, slot: Slot) -> Dict[str, str]:

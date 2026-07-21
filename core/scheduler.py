@@ -107,14 +107,25 @@ def _remaining_games(md: MatchDayState, node_id: str, slot: str) -> List[Tuple[i
     return out
 
 
-def _node_units(md: MatchDayState, nid: str, ready: float, order: int) -> List[_Unit]:
+def _node_units(
+    md: MatchDayState, nid: str, ready: float, order: int,
+    skip: frozenset = frozenset(),
+) -> List[_Unit]:
     """Split a matchup's remaining games into schedulable units with
-    template-style dependencies."""
+    template-style dependencies.
+
+    Matches in `skip` (host-confirmed, already pinned to their court by the
+    pre-pass) generate no units, but still appear as dependency keys so the
+    blind match keeps waiting for them.
+    """
     games_per_match = md.cfg["format"]["games_per_match"]
     units: List[_Unit] = []
     main_keys: List[Tuple[str, str, str]] = []
 
     for si, slot in enumerate(FIRST_FOUR):
+        if (nid, slot) in skip:
+            main_keys.append((nid, slot, "main"))
+            continue
         rem = _remaining_games(md, nid, slot)
         main = [g for g in rem if g[0] < games_per_match]
         third = [g for g in rem if g[0] == games_per_match]
@@ -126,6 +137,8 @@ def _node_units(md: MatchDayState, nid: str, ready: float, order: int) -> List[_
             deps = [(nid, slot, "main")] if main else []
             units.append(_Unit(nid, slot, "third", third, deps, ready, False, (2, order, si)))
 
+    if (nid, "BLIND") in skip:
+        return units
     rem = _remaining_games(md, nid, "BLIND")
     bmain = [g for g in rem if g[0] < games_per_match]
     bthird = [g for g in rem if g[0] == games_per_match]
@@ -156,6 +169,33 @@ def plan(md: MatchDayState, now: float = 0.0) -> List[Slot]:
     court_free: Dict[int, float] = {c: now for c in courts}
     slots_out: List[Slot] = []
     node_end: Dict[str, float] = {}
+    games_per_match = cfg["format"]["games_per_match"]
+
+    # pre-pass: host-confirmed matches are pinned to their announced court,
+    # starting now; their remaining games never move to another court
+    started_keys = set()
+    pre_ends: Dict[Tuple[str, str, str], float] = {}
+    pre_node_end: Dict[str, float] = {}
+    for (nid, mslot), info in sorted(md.started.items()):
+        games = _remaining_games(md, nid, mslot)
+        if not games:
+            continue
+        court = info["court"]
+        dur = game_minutes(md, nid, mslot)
+        t = max(now, court_free[court])
+        end_main = t
+        for game_no, conditional in games:
+            note = "game 3 (conditional)" if conditional else "in play (confirmed)"
+            slots_out.append(Slot(t, t + dur, court, nid, mslot, game_no, note))
+            t += dur
+            if game_no < games_per_match:
+                end_main = t
+        court_free[court] = t + changeover
+        started_keys.add((nid, mslot))
+        pre_ends[(nid, mslot, "main")] = end_main
+        pre_ends[(nid, mslot, "third")] = t
+        pre_node_end[nid] = max(pre_node_end.get(nid, now), t)
+    started_keys = frozenset(started_keys)
 
     def node_ready(nid: str) -> float:
         node = md.nodes[nid]
@@ -183,9 +223,9 @@ def plan(md: MatchDayState, now: float = 0.0) -> List[Slot]:
                 if md.node_finished(nid):
                     node_end[nid] = now
                     continue
-                units += _node_units(md, nid, node_ready(nid), order)
+                units += _node_units(md, nid, node_ready(nid), order, started_keys)
 
-            ends: Dict[Tuple[str, str, str], float] = {}
+            ends: Dict[Tuple[str, str, str], float] = dict(pre_ends)
             pending = list(units)
             while pending:
                 # units whose dependencies are all scheduled
@@ -220,7 +260,7 @@ def plan(md: MatchDayState, now: float = 0.0) -> List[Slot]:
                 if md.node_finished(nid):
                     continue
                 unit_ends = [e for k, e in ends.items() if k[0] == nid]
-                node_end[nid] = max(unit_ends) if unit_ends else now
+                node_end[nid] = max(unit_ends) if unit_ends else pre_node_end.get(nid, now)
 
     return sorted(slots_out, key=lambda s: (s.start, s.court))
 

@@ -1,4 +1,11 @@
-"""Admin desk, three tabs:
+"""Admin desk, four tabs:
+
+- Live: the host console — everything the spectator page shows (court map,
+  bracket, ranking, blind results, next-up) plus the announce-and-confirm
+  flow: for each free court the host reads out who plays what where, watches
+  the players walk on, then presses Confirm (a match_started event). Only
+  then does the volunteer's score entry unlock for that match, and the
+  schedule pins the match to that court.
 
 - Group draw: seed-driven random assignment of the 8 teams to G1-G8; the seed
   is logged with the event, so the draw is reproducible.
@@ -18,7 +25,19 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from common import env_badge, get_store, load_state, names, team_label  # noqa: E402
+from common import (  # noqa: E402
+    env_badge,
+    get_store,
+    load_state,
+    match_desc,
+    names,
+    render_blind_board,
+    render_bracket,
+    render_court_grid,
+    render_next_up,
+    render_ranking,
+    team_label,
+)
 from core.draw import group_draw_assign  # noqa: E402
 from core.models import Event  # noqa: E402
 
@@ -48,9 +67,60 @@ def precheck_and_append(type_: str, payload: dict, seed=None) -> bool:
         return False
 
 
-tab_draw, tab_lineups, tab_fix = st.tabs(
-    ["Group draw", "Lineups", "Score correction"]
+tab_live, tab_draw, tab_lineups, tab_fix = st.tabs(
+    ["Live (host console)", "Group draw", "Lineups", "Score correction"]
 )
+
+with tab_live:
+    if not md.group_of:
+        st.info("Run the group draw first (next tab).")
+    else:
+        render_court_grid(cfg, md, slots, now)
+        st.subheader("Announce & confirm")
+        st.caption(
+            "Read the announcement out loud, watch the players walk onto the "
+            "court, then press Confirm. The match becomes officially in play "
+            "and the volunteer's score entry unlocks."
+        )
+        total = cfg["courts"]["total"]
+        for court in range(1, total + 1):
+            busy = md.started_on_court(court)
+            if busy is not None:
+                nid, mslot = busy
+                m = md.matches[(nid, mslot)]
+                score = "  ".join(f"{a}:{b}" for a, b in m.games) or "no games yet"
+                st.markdown(
+                    f"**Court {court}** — 🔴 in play: `{nid} {mslot}` "
+                    f"{names(md, m.a)} vs {names(md, m.b)} ({score}) — "
+                    "waiting for the volunteer's score"
+                )
+                continue
+            cand = next(
+                (sl for sl in slots
+                 if sl.court == court and (sl.node, sl.match_slot) not in md.started),
+                None,
+            )
+            if cand is None:
+                st.markdown(f"**Court {court}** — 🟢 free, nothing to call")
+                continue
+            d = match_desc(md, cand)
+            c1, c2 = st.columns([4, 1])
+            with c1:
+                st.markdown(
+                    f"**Court {court}** — 📣 announce: {d['matchup']} · "
+                    f"`{d['match']}` · **{d['players']}** → Court {court}"
+                )
+            with c2:
+                if st.button("Confirm started", key=f"start_{court}"):
+                    payload = {"node": cand.node, "slot": cand.match_slot,
+                               "court": court}
+                    if precheck_and_append("match_started", payload):
+                        st.rerun()
+        st.divider()
+        render_bracket(cfg, md, slots)
+        render_ranking(md)
+        render_blind_board(md)
+        render_next_up(cfg, md, slots, now)
 
 with tab_draw:
     if md.group_of:

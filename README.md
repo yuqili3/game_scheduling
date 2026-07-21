@@ -133,7 +133,8 @@ python3 cli/withdraw.py --withdrawn 17 --new-captain 25 --substitute "候补姓�
 | group_draw | Admin 页种子随机分组 | groups(G 编号 → 队伍);seed 入日志可复现 |
 | lineup_submit | 每轮开赛前 | node、team、WD/MD1-3 名单 |
 | blind_draw_result | 队长页种子盲抽(或 Admin 兜底) | node、team、被抽中队员;**seed 必带**,同种子可复现 |
-| game_finished | 每局打完(志愿者录入) | node、slot、game、score |
+| match_started | 主持人宣读并确认选手上场 | node、slot、court;确认后志愿者方可录分,排程将该场钉在此场地 |
+| game_finished | 每局打完(志愿者录入) | node、slot、game、score、court;**双方人员未齐(名单/盲抽缺失)时拒绝录入** |
 | absence_registered | 有人伤/缺 | team、absent_id(该队全部改 15 分制) |
 | substitute_assigned | 每轮队长指定 | team、round、substitute_id(三轮不得重复,程序校验) |
 | game_corrected | Admin 更正错录比分 | node、slot、game、score;补偿事件,原录入保留;更正后多余局自动剔除 |
@@ -179,7 +180,10 @@ streamlit run app/Home.py        # 场馆笔记本上启动,手机浏览器访�
   ① 提交本轮名单(有比分后锁定);② **种子盲抽**——输入随机种子,为**对方**
   在合规池内(性别构成、非队长、排除前几轮已被抽中者)确定性抽出第五场人选,
   种子入日志可复现;③ 缺席登记与每轮顶替指定(三轮不重复校验)
-- **Admin(管理页)**:`broadcast.admin_pin` 登录,三个标签:
+- **Admin(管理页)**:`broadcast.admin_pin` 登录,四个标签:
+  ⓪ **Live 主持人控制台**——观众页全部内容(场地图/对阵树/排名/盲抽/下一场)+
+  逐场确认流:每块空闲场地显示下一场宣读词,主持人念完并看到选手上场后按
+  "确认开打"(`match_started` 事件),该场变为进行中并等待志愿者录分;
   ① **对阵抽签(种子驱动)**——输入随机种子把 8 队随机分到 G1–G8,种子入日志可复现;
   ② **Lineups 状态总览**——按轮次监控每场对抗双方:名单是否提交、是否合规(缺项
   逐条列出)、盲抽是否完成及结果(含种子)、各队缺席/顶替状态;录入动作在队长页,
