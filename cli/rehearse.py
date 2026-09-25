@@ -11,7 +11,7 @@ Run it against a COPY of the repo (it writes real events):
     python3 cli/rehearse.py --interval 3 # terminal 2, same copy
 
 Options:
-    --seed N        master seed for the whole rehearsal (default 20260719)
+    --seed S        master seed (integer or any text) for the whole rehearsal (default 20260719)
     --interval S    seconds between games (default 3.0; 0 = instant)
     --keep-clock    do NOT rewrite broadcast.session_start to "now" (by
                     default it is rewritten so the live court map lines up
@@ -31,6 +31,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from core import io_utils, rules
 from core.draw import blind_draw_pick, group_draw_assign
 from core.eventstore import EventStore
+from core.models import parse_seed
 from core.matchday import replay_matchday
 from core.replay import PRE_MATCH_EVENTS, replay
 from core.scheduler import plan
@@ -39,7 +40,7 @@ from core.scheduler import plan
 def rebuild(store, players, cfg):
     events = store.events()
     base = replay(players, [e for e in events if e.type in PRE_MATCH_EVENTS],
-                  cfg["players"]["num_teams"])
+                  **io_utils.draw_params(cfg))
     return base, replay_matchday(base, events, cfg)
 
 
@@ -52,7 +53,8 @@ def volunteer_for_court(cfg, court):
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="accelerated match-day rehearsal")
-    ap.add_argument("--seed", type=int, default=20260719)
+    ap.add_argument("--seed", type=parse_seed, default=20260719,
+                    help="master seed: an integer or any text")
     ap.add_argument("--interval", type=float, default=3.0)
     ap.add_argument("--keep-clock", action="store_true")
     ap.add_argument("--env", default="sim",

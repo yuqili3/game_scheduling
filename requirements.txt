@@ -1,2 +1,2 @@
-pyyaml>=6.0
-streamlit>=1.37   # match-day live app (app/)
+pyyaml>=6.0          # config.yaml; the only dependency of the pre-match CLIs (draw/import/withdraw/substitute)
+streamlit>=1.37      # match-day live app (app/) and rehearsal only

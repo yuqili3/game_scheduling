@@ -11,7 +11,7 @@ from core import rules
 from core.draw import blind_draw_pick, draw_teams, group_draw_assign
 from core.io_utils import load_config, load_players
 from core.matchday import MatchDayState, replay_matchday
-from core.models import Event, TournamentState
+from core.models import Event, TeamComposition, TournamentState
 from core.scheduler import game_minutes, plan, utilization
 
 CFG = load_config()
@@ -19,7 +19,7 @@ CFG = load_config()
 
 def base_state() -> TournamentState:
     players = load_players()
-    teams = draw_teams(players, 8, seed=1)
+    teams = draw_teams(players, TeamComposition.legacy_default(), 8, seed=1)
     return TournamentState(players=players, teams=teams)
 
 

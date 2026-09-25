@@ -1,64 +1,51 @@
 #!/usr/bin/env python3
 """Initial team draw: append an initial_draw event, replay, validate, export snapshot.
 
+The team structure (how many of each gender / role per team) comes from the
+environment's config `players.team_composition`; the event records it so a
+later config change cannot silently change the replayed roster.
+
 Usage:
-    python3 cli/draw_teams.py --seed 20260719 [--actor organizer] [--date 20260612]
+    python3 cli/draw_teams.py --seed 20260925 --env xd2026 --dry-run   # preview
+    python3 cli/draw_teams.py --seed 20260925 --env xd2026             # write
 """
 from __future__ import annotations
 
 import argparse
 import sys
-from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from core import io_utils
-from core.models import Event
-from core.replay import replay
+from cli._pre import add_common_args, commit, new_event, setup  # noqa: E402
+from core import io_utils  # noqa: E402
+from core.models import parse_seed, roster_fingerprint  # noqa: E402
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="initial team draw")
-    ap.add_argument("--seed", type=int, required=True,
-                    help="random seed (logged with the event, reproducible)")
-    ap.add_argument("--actor", default="organizer")
-    ap.add_argument("--date", default=None, help="snapshot date YYYYMMDD, default today")
-    ap.add_argument("--env", default=None,
-                    help="data environment under data/ (default: GS_ENV or prod)")
+    ap.add_argument("--seed", type=parse_seed, required=True,
+                    help="random seed: an integer or any text (logged with the event, reproducible)")
+    add_common_args(ap)
     args = ap.parse_args()
-    if args.env:
-        io_utils.set_env(args.env)
 
-
-    cfg = io_utils.load_config()
-    players = io_utils.load_players()
-    events = io_utils.read_events()
-    if any(e.type in ("initial_draw", "assign_teams") for e in events):
+    cfg, players = setup(args)
+    if any(e.type in ("initial_draw", "assign_teams") for e in io_utils.read_events()):
         print("warning: the log already contains a team assignment; "
               "this draw will supersede it")
 
-    ev = Event(
-        seq=io_utils.next_seq(),
-        ts=datetime.now().isoformat(timespec="seconds"),
-        type="initial_draw",
-        actor=args.actor,
-        payload={},
+    params = io_utils.draw_params(cfg)
+    ev = new_event(
+        args,
+        "initial_draw",
+        {"num_teams": params["num_teams"],
+         "team_composition": params["composition"].to_payload(),
+         "balance_by_level": params["balance_by_level"],
+         "assign_pairs": params["assign_pairs"],
+         "roster_fingerprint": roster_fingerprint(players)},
         seed=args.seed,
     )
-    io_utils.append_event(ev)
-
-    state = replay(players, io_utils.read_events(), cfg["players"]["num_teams"])
-    state.validate(cfg["players"]["females_per_team"], cfg["players"]["males_per_team"])
-
-    date_str = args.date or datetime.now().strftime("%Y%m%d")
-    out = io_utils.snapshot_path(date_str)
-    io_utils.export_teams_csv(state, out)
-
-    print(f"draw complete seed={args.seed}, snapshot: {out}")
-    for tid in sorted(state.teams):
-        names = [state.players[m].name for m in state.teams[tid]]
-        print(f"  team {tid}: captain {names[0]} | " + ", ".join(names[1:]))
+    commit(args, cfg, players, ev, f"draw complete seed={args.seed}")
 
 
 if __name__ == "__main__":

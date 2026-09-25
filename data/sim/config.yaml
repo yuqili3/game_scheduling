@@ -6,9 +6,11 @@ players:
   num_female: 16          # ids 1-16
   num_male: 48            # ids 17-64 (17-24 are captains)
   num_teams: 8
-  females_per_team: 2
-  males_per_team: 6       # including captain
-  captain_gender: M
+  team_composition:       # per-team structure, dealt slot by slot in this order
+    - {gender: M, count: 1, role: captain}
+    - {gender: F, count: 2}
+    - {gender: M, count: 5}
+  balance_by_level: true  # stratify by the optional players*.csv `level` column
 
 format:
   num_rounds: 3

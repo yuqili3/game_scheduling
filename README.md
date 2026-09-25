@@ -1,9 +1,18 @@
-# 2026 羽毛球大乱斗 — 赛事管理系统
+# 羽毛球赛事管理系统(抽签 / 排程 / 直播)
 
-为《建群三周年活动:2026"我们来打羽毛球"大乱斗》(2026-07-19, Seattle Badminton Club)
-开发的赛事模拟、排程与直播系统。64 人(48 男 + 16 女)、8 队、三轮排位赛,决出第 1–8 名。
+最初为《建群三周年活动:2026"我们来打羽毛球"大乱斗》(2026-07-19, Seattle Badminton Club)
+开发:64 人(48 男 + 16 女)、8 队、三轮排位赛,决出第 1–8 名。现已把**赛前抽签通用化**,
+同一套代码按 `data/<env>/` 目录承载多个赛事:
 
-完整需求与架构见 [spec.md](spec.md)。
+| env | 赛事 | 人数 / 队伍结构 | 状态 |
+|-----|------|----------------|------|
+| `prod` | 2026 大乱斗(7/19) | 64 人,8 队 × (1 男队长 + 5 男 + 2 女) | 已完赛,数据冻结 |
+| `sim` | 大乱斗彩排沙盒 | 同 prod | 随便折腾 |
+| `xd2026` | **2026 趣味混双友谊赛**(10/17, Redmond Badminton Club) | 24 人,6 队 × (1 指定男队长 + 1 男 + 2 女),混双搭档随抽签确定 | 赛前抽签可用;比赛日排程/App 待做 |
+
+需求与架构文档按版本分文件、不原地覆盖:[spec.md](spec.md) 是首届(v3,冻结),
+[spec_20260925.md](spec_20260925.md) 是当前版(指定队长固定席位 + 混双搭档抽签),上一版是
+[spec_20260923.md](spec_20260923.md)(通用抽签 + xd2026)。以后每次需求变更另存 `spec_YYYYMMDD.md`。
 
 ## 核心理念:事件溯源,一切可复现
 
@@ -15,29 +24,37 @@
 ```
 
 - 所有随机操作(抽签、重抽、盲抽)的**种子记录在事件里**,同种子重跑结果必然一致
+- 种子可以是整数,也可以是任意文本(比如现场喊出的一句话)。纯数字会按整数处理,
+  所以 `20260925` 和 `"20260925"` 是同一个种子;`007` 会记为 `7`。字符串种子跨机器同样可复现
 - 录入错误不改历史,追加更正事件即可,审计轨迹完整
 - `teams_*.csv` 等快照文件只是重放结果的导出物,删掉可全部重新生成
 
 ## 目录结构
 
 ```
-data/<env>/              # 每个环境一个自包含目录: prod = 正式赛事, sim = 彩排/模拟
-  config.yaml            # 全部超参数(英文键名,中文注释): 人员/赛制/场地/时长/可视化/志愿者
-  players_female.csv     # 初始人员表·女(序号 1-16;仓库内为 celebrity 占位姓名)
-  players_male.csv       # 初始人员表·男(17-64,其中 17-24 为八名队长;同为占位姓名)
+spec.md                  # 首届需求(v3,冻结);spec_YYYYMMDD.md = 之后各版完整快照
+data/<env>/              # 每个赛事一个自包含目录: prod / sim / xd2026
+  config.yaml            # 全部超参数(英文键名,中文注释): 人员(含 team_composition)/赛制/场地/时长/可视化/志愿者
+  players*.csv           # 初始人员表(习惯分 players_female.csv / players_male.csv;仓库内为 celebrity 占位姓名)
+                         #   必填列 id,name,gender;可选列 is_captain(缺省 false)、level(水平档,留空=不分档)
   events.jsonl           # 事件日志(唯一事实来源)
   tournament.db          # SQLite 并发写入层(不入 git,可由 jsonl 重建)
-  teams_YYYYMMDD*.csv    # 分队快照(每次抽签/退赛后导出,带日期戳)
+  teams_YYYYMMDD*.csv    # 分队快照(每次抽签/退赛/递补后导出,带日期戳)
 core/                    # 纯函数层(不碰文件/时钟/全局随机数)
-  models.py              # Player / Event / TournamentState
-  draw.py                # 初始抽签、退赛重抽(全部 (state, seed) -> result)
+  models.py              # Player / Slot / TeamComposition / Event / TournamentState
+  draw.py                # 通用抽签(队伍结构由 config 驱动)、退赛重抽、直接递补、盲抽(全部 (state, seed) -> result)
   rules.py               # 对阵树、晋级逻辑、比分判定、最终排名
   matchday.py            # 比赛日状态: 名单/盲抽/比分/缺人顶替的事件重放
   scheduler.py           # 时长模型 + 贪心排程 + 事件驱动重排
   replay.py              # 赛前事件重放
   io_utils.py            # IO 层: 配置/人员表/事件日志/CSV 导出
   eventstore.py          # SQLite 事件存储(志愿者并发写),自动导出回 events.jsonl
-cli/                     # 命令行工具(写事件的唯一入口之一)
+cli/                     # 命令行工具(写事件的唯一入口之一),赛前四件套均支持 --env / --dry-run
+  draw_teams.py          # 初始抽签(种子驱动)
+  import_teams.py        # 导入线下已抽好的名单
+  withdraw.py            # 退赛重抽(大乱斗规则: 其余各队各出 1 人 + 候补重洗)
+  substitute.py          # 直接递补(候补顶原位,无随机;趣味混双规则)
+  schedule.py / rehearse.py  # 比赛日排程查看 / 彩排驱动器(仅首届赛制)
 app/                     # Streamlit 直播 App
   Home.py                # 观众页: 场地五色面板 + 对阵树 + 排名 + 下一场
   pages/1_Score_Entry.py # 志愿者录入页(独立 PIN,只见分管场地,比分整轮留存)
@@ -57,8 +74,26 @@ tests/                   # 单元测试: python3 -m unittest discover -s tests
 环境时每个页面顶部都会显示 🧪 SIMULATION 警示条,防止混淆。彩排驱动器
 `cli/rehearse.py` 默认跑在 sim,并且拒绝在 prod 运行(除非 `--force-prod`)。
 
-未来复用同一代码办混双/女双/男双专项赛时,为每个赛事建一个新的环境目录
-(自带人员表与赛制 config)即可。
+复用同一代码办新赛事 = 建一个新的环境目录(自带人员表与赛制 config),第一个例子是
+`data/xd2026/`(2026 趣味混双友谊赛)。抽签相关的一切都从 config 的
+`players.team_composition` 读取,**换一个男女配比只改 config,不改代码**:
+
+```yaml
+players:
+  num_teams: 6
+  team_composition:            # 每队结构 = 若干槽位,按顺序发牌
+    - {gender: M, count: 1, role: captain}   # 队长槽放第一位,队长恒在每队首位
+    - {gender: M, count: 1}    # role 缺省 member
+    - {gender: F, count: 2}
+  balance_by_level: true       # 人员表有 level 列时按水平分层抽,各队每档人数差 ≤1
+  assign_pairs: true           # 抽完队伍后为每队随机配混双组合;标签 = 队伍字母 + 对号(A1/A2、B1/B2 …),队长的组合 = 第 1 对
+```
+
+每个槽位对应一个候选池,池大小必须恰好等于 `count × num_teams`,否则抽签直接报错。
+人员表里填了 `fixed_team` 的人(比如主办方指定的队长)在抽签前就钉在那个队,不进候选池,
+剩余名额按各队缺几个逐层轮转发牌。
+xd2026 环境目前只支持赛前 CLI(抽签/导入/递补),App 与排程器尚未适配该赛制,不要在
+该环境下启动 `streamlit`。
 
 ### 彩排(比赛日预演)
 
@@ -75,7 +110,7 @@ python3 cli/rehearse.py --interval 4     # 终端 2: 每 4 秒喂入一个事件
 ## 安装
 
 ```bash
-pip3 install -r requirements.txt   # 目前仅 pyyaml;M3 展示端需再装 streamlit
+pip3 install -r requirements.txt   # 赛前抽签 CLI 只需 pyyaml;streamlit 仅比赛日 App/彩排用
 ```
 
 ## 按赛事流程使用
@@ -84,7 +119,7 @@ pip3 install -r requirements.txt   # 目前仅 pyyaml;M3 展示端需再装 stre
 
 编辑 `config.yaml`。所有可调参数都在这里,程序不硬编码任何数值:
 
-- **人员**: 男女数量、队伍数、每队结构
+- **人员**: 队伍数、每队结构(`team_composition` 槽位列表)、是否按水平分层(`balance_by_level`)
 - **赛制**: 轮数、每轮 5 场、5 场 3 胜、21 分制、缺人队伍改 15 分制、盲抽局类型
 - **时长模型**: 女双 10 分钟/局,男双混双 13 分钟/局;强强对话每局 +3 分钟
   (判定阈值: 每局净胜 ≥6 或每场净胜 ≥12);连打两场之间休息 5 分钟
@@ -96,22 +131,32 @@ pip3 install -r requirements.txt   # 目前仅 pyyaml;M3 展示端需再装 stre
 > 隐私说明:仓库内的所有人员表使用 **celebrity 占位姓名**,性别与队长结构和
 > 真实名单一一对应;真实姓名只在线下保存,比赛日本地部署时替换即可。
 
-`data/players_female.csv`(1–16)与 `data/players_male.csv`(17–64)。
-只固定 8 名男队长(`是否队长=true`),队伍归属由下一步产生。
+`data/<env>/players_female.csv` 与 `players_male.csv`(程序读取该目录下所有 `players*.csv`)。
+必填列 `id,name,gender`;可选列 `is_captain`(首届只固定 8 名男队长为 true,无队长赛事可省略此列)、
+`level`(水平档位,如 A/B/C,留空即不分档)和 `fixed_team`(填队号 = 抽签前钉在该队,其余留空)。
+队伍归属由下一步产生。
 
 ### 阶段 2:抽签分队(6/12)
 
 两种方式,二选一:
 
 ```bash
-# 方式 A: 程序抽签(种子记入事件日志,可复现)
+# 方式 A: 程序抽签(种子记入事件日志,可复现);先 --dry-run 预览,确认后去掉再跑一次正式写入
+python3 cli/draw_teams.py --seed 20260612 --dry-run
 python3 cli/draw_teams.py --seed 20260612
+python3 cli/draw_teams.py --seed "周五晚上见"        # 种子也可以是任意文本
 
 # 方式 B: 线下已抽好,导入公布的名单(读根目录 players.csv)
 python3 cli/import_teams.py --date 20260612
 ```
 
-两者都会追加事件、校验每队结构(1 队长 + 5 男 + 2 女)并导出 `data/teams_20260612.csv`。
+两者都会追加事件、按 config 的 `team_composition` 校验每队结构并导出
+`data/<env>/teams_20260612.csv`。抽签算法(与队伍结构无关):
+
+1. 每个槽位一个候选池(按性别 + 角色过滤),先排序再用 `random.Random(seed)` 洗牌,与文件行序无关
+2. 有 `level` 列且 `balance_by_level: true` 时,池内先按档位分层、每档单独洗牌再拼接
+3. 队伍顺序洗牌一次,然后轮转发牌(第 k 张给第 k mod n 队),同档人员因此均匀撒到各队
+4. `initial_draw` 事件的 payload 记下当时的 `num_teams`、`team_composition` 和人员表指纹(id/性别/角色/档位的哈希,不含姓名),重放时与 config 及当前 CSV 比对;抽签后改 config 或补填 `level` 会报错而不是悄悄换一套名单,把占位名换成真名则不受影响
 
 ### 阶段 3:退赛重抽(6/12 – 7/18,可发生多次)
 
@@ -123,9 +168,32 @@ python3 cli/withdraw.py --withdrawn 33 --substitute "候补姓名" --seed 777
 python3 cli/withdraw.py --withdrawn 17 --new-captain 25 --substitute "候补姓名" --seed 778
 ```
 
-自动执行 PDF 规则:其余 7 队各随机抽 1 名同性别非队长成员,连同候补共 8 人重新洗牌
-分入 8 队空缺。输出带日期戳的新快照(同日多次自动编号 `_2`/`_3`)和逐步变更日志。
+自动执行大乱斗 PDF 规则:其余各队各随机抽 1 名同性别非队长成员,连同候补一起重新洗牌
+分入各队空缺。输出带日期戳的新快照(同日多次自动编号 `_2`/`_3`)和逐步变更日志。
 **用相同种子重跑必得相同结果。**
+
+### 阶段 3b:直接递补(公布后不接受退赛的赛事)
+
+```bash
+# 候补者直接顶替退赛者的位置,不重抽、无随机
+python3 cli/substitute.py --env xd2026 --withdrawn 7 --substitute "候补姓名"
+```
+
+追加 `substitute_direct` 事件(不带种子);候补者拿新 id,继承退赛者的性别与档位。
+
+### 第二届:2026 趣味混双友谊赛(env `xd2026`)赛前操作
+
+| 日期 | 动作 | 命令 |
+|------|------|------|
+| 9/23 报名开放 | 真实报名名单已填进 `data/xd2026/players_female.csv`(id 1–12 = 女生报名顺序)/ `players_male.csv`(id 13–24 = 男生报名顺序 1–12);6 名指定队长 `is_captain=true` 且 `fixed_team` = 队号(1 DreamWu、2 Michael Chou、3 Zack Chen、4 Yingtong Chen、5 Zhihao Hu、6 Guoquan Feng);`level` 列留空 | 编辑 CSV |
+| 9/25 中午截止 | 预览抽签 | `python3 cli/draw_teams.py --env xd2026 --seed 20260925 --dry-run` |
+| 9/25 抽签公布 | 正式抽签并导出快照 `data/xd2026/teams_20260925.csv`(含 `pair` 列: 组合标签,1 队 A1/A2、2 队 B1/B2 … 6 队 F1/F2,队长在第 1 对) | `python3 cli/draw_teams.py --env xd2026 --seed 20260925` |
+| 9/25 之后 | 极端情况按候补名单递补 | `python3 cli/substitute.py --env xd2026 --withdrawn <id> --substitute "<姓名>"` |
+| 10/17 比赛日 | 循环赛排程 / App 尚未适配(见 spec_20260923.md 4.2) | — |
+
+种子可以任选:整数(比如抽签当天日期 + 现场报数)或任意文本(比如群里大家投票选出的一句话,
+`--seed "我们来打羽毛球"`);种子记入 `data/xd2026/events.jsonl`,任何人拿同一份名单 + 同一种子
+重跑都得到同样分队。
 
 ### 阶段 4:比赛日排程(7/19)
 

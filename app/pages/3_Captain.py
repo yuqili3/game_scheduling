@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from common import env_badge, get_store, load_state, names, team_label  # noqa: E402
 from core.draw import blind_draw_pick  # noqa: E402
-from core.models import Event  # noqa: E402
+from core.models import Event, parse_seed  # noqa: E402
 
 st.set_page_config(page_title="Captain", page_icon="🧢", layout="wide")
 st.title("🧢 Captain Desk")
@@ -167,19 +167,20 @@ with tab_blind:
                 f"males: {names(md, mal) or 'none'}"
             )
             with st.form("blind_seed"):
-                seed = st.number_input("Random seed (announce it out loud, then enter)",
-                                       min_value=0, max_value=10**9, step=1)
+                seed_text = st.text_input(
+                    "Random seed (a number or any text; announce it out loud, then enter)")
                 if st.form_submit_button(f"Draw opponent's {category} pair"):
                     try:
-                        picked = blind_draw_pick(category, fem, mal, int(seed))
+                        seed = parse_seed(seed_text)
+                        picked = blind_draw_pick(category, fem, mal, seed)
                     except ValueError as exc:
                         st.error(str(exc))
                         picked = None
                     if picked:
                         payload = {"node": node_id, "team": opp_tid, "players": picked}
                         if precheck_and_append("blind_draw_result", payload, actor,
-                                               seed=int(seed)):
-                            st.success(f"Drawn with seed {int(seed)}: {names(md, picked)}")
+                                               seed=seed):
+                            st.success(f"Drawn with seed {seed!r}: {names(md, picked)}")
                             st.rerun()
 
 with tab_absence:

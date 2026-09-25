@@ -19,7 +19,7 @@ from typing import List, Optional
 
 from . import io_utils
 from .io_utils import read_events
-from .models import Event
+from .models import Event, Seed
 
 
 class EventStore:
@@ -44,7 +44,7 @@ class EventStore:
                     type TEXT NOT NULL,
                     actor TEXT NOT NULL,
                     payload TEXT NOT NULL,
-                    seed INTEGER
+                    seed INTEGER   -- INTEGER affinity: int seeds stored as integers, text seeds as TEXT
                 )"""
             )
 
@@ -73,7 +73,7 @@ class EventStore:
         ]
 
     def append(
-        self, type_: str, actor: str, payload: dict, seed: Optional[int] = None
+        self, type_: str, actor: str, payload: dict, seed: Optional[Seed] = None
     ) -> Event:
         ts = datetime.now().isoformat(timespec="seconds")
         with self._conn() as conn:

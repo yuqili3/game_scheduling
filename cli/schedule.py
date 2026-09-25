@@ -40,7 +40,7 @@ def main() -> None:
     players = io_utils.load_players()
     events = io_utils.read_events()
     base = replay(players, [e for e in events if e.type in PRE_MATCH_EVENTS],
-                  cfg["players"]["num_teams"])
+                  **io_utils.draw_params(cfg))
     md = replay_matchday(base, events, cfg)
 
     if not md.group_of:

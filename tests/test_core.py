@@ -12,14 +12,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from core.draw import draw_teams, withdraw_redraw
-from core.io_utils import load_config, load_players
+from core.io_utils import draw_params, load_config, load_players
 from core.models import Event, TournamentState
 from core.replay import replay
 
 CFG = load_config()
 N_TEAMS = CFG["players"]["num_teams"]
-F_PER = CFG["players"]["females_per_team"]
-M_PER = CFG["players"]["males_per_team"]
+COMP = draw_params(CFG)["composition"]
 
 
 def real_players():
@@ -28,7 +27,7 @@ def real_players():
 
 def make_state(seed=1):
     players = real_players()
-    teams = draw_teams(players, N_TEAMS, seed)
+    teams = draw_teams(players, COMP, N_TEAMS, seed)
     return TournamentState(players=players, teams=teams)
 
 
@@ -43,15 +42,15 @@ class TestDraw(unittest.TestCase):
 
     def test_deterministic_same_seed(self):
         players = real_players()
-        self.assertEqual(draw_teams(players, N_TEAMS, 42), draw_teams(players, N_TEAMS, 42))
+        self.assertEqual(draw_teams(players, COMP, N_TEAMS, 42), draw_teams(players, COMP, N_TEAMS, 42))
 
     def test_different_seed_differs(self):
         players = real_players()
-        self.assertNotEqual(draw_teams(players, N_TEAMS, 1), draw_teams(players, N_TEAMS, 2))
+        self.assertNotEqual(draw_teams(players, COMP, N_TEAMS, 1), draw_teams(players, COMP, N_TEAMS, 2))
 
     def test_structure_valid(self):
         state = make_state(seed=7)
-        state.validate(F_PER, M_PER)  # passing = no exception
+        state.validate(COMP)  # passing = no exception
         self.assertEqual(sum(len(m) for m in state.teams.values()), 64)
 
 
@@ -63,7 +62,7 @@ class TestWithdraw(unittest.TestCase):
         )
         players, teams, log = withdraw_redraw(state, quitter, "Sub A", seed=99)
         new_state = TournamentState(players=players, teams=teams)
-        new_state.validate(F_PER, M_PER)
+        new_state.validate(COMP)
         self.assertNotIn(quitter, players)
         sub_id = max(players)
         self.assertEqual(players[sub_id].name, "Sub A")
@@ -75,7 +74,7 @@ class TestWithdraw(unittest.TestCase):
         quitter = next(pid for pid, p in state.players.items() if p.gender == "F")
         players, teams, _ = withdraw_redraw(state, quitter, "Sub F", seed=5)
         new_state = TournamentState(players=players, teams=teams)
-        new_state.validate(F_PER, M_PER)
+        new_state.validate(COMP)
         self.assertEqual(players[max(players)].gender, "F")
 
     def test_captain_withdraw_requires_successor(self):
@@ -96,7 +95,7 @@ class TestWithdraw(unittest.TestCase):
         players, teams, _ = withdraw_redraw(state, captain, "Sub C", seed=11,
                                             new_captain_id=successor)
         new_state = TournamentState(players=players, teams=teams)
-        new_state.validate(F_PER, M_PER)
+        new_state.validate(COMP)
         self.assertTrue(players[successor].is_captain)
         self.assertEqual(teams[tid][0], successor)
 
@@ -140,7 +139,7 @@ class TestReplay(unittest.TestCase):
         s2 = replay(players, self._events(), N_TEAMS)
         self.assertEqual(s1.teams, s2.teams)
         self.assertEqual(s1.players, s2.players)
-        s1.validate(F_PER, M_PER)
+        s1.validate(COMP)
 
     def test_replay_prefix_is_intermediate_state(self):
         """Replaying an event prefix yields the state at that time (acceptance #3)."""
@@ -148,11 +147,11 @@ class TestReplay(unittest.TestCase):
         mid = replay(players, self._events()[:2], N_TEAMS)
         self.assertNotIn(30, mid.players)
         self.assertIn(5, mid.players)  # second withdrawal has not happened yet
-        mid.validate(F_PER, M_PER)
+        mid.validate(COMP)
 
     def test_assign_teams_event(self):
         players = real_players()
-        teams = draw_teams(players, N_TEAMS, 123)
+        teams = draw_teams(players, COMP, N_TEAMS, 123)
         ev = Event(
             1,
             "2026-06-12T12:00:00",
@@ -162,7 +161,7 @@ class TestReplay(unittest.TestCase):
         )
         state = replay(players, [ev], N_TEAMS)
         self.assertEqual(state.teams, teams)
-        state.validate(F_PER, M_PER)
+        state.validate(COMP)
 
     def test_unknown_event_rejected(self):
         players = real_players()

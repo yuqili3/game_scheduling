@@ -37,7 +37,7 @@ def load_state() -> Tuple[dict, MatchDayState, List[Slot], float]:
     base = replay(
         players,
         [e for e in events if e.type in PRE_MATCH_EVENTS],
-        cfg["players"]["num_teams"],
+        **io_utils.draw_params(cfg),
     )
     md = replay_matchday(base, events, cfg)
     now = now_minutes(cfg)

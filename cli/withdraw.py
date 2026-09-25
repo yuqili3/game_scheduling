@@ -1,75 +1,49 @@
 #!/usr/bin/env python3
-"""Withdrawal redraw: append a withdraw_redraw event, replay, validate, export
-a date-stamped snapshot.
-
-Can be run multiple times; each run must supply an explicit seed, and the same
-seed always reproduces the same result.
+"""Pre-event withdrawal redraw (2026 melee rules): every other team gives up
+one same-gender non-captain member, those plus the substitute are reshuffled
+into the vacancies. Appends a withdraw_redraw event.
 
 Usage:
-    python3 cli/withdraw.py --withdrawn 33 --substitute "Xin Wang" --seed 777
-    python3 cli/withdraw.py --withdrawn 17 --new-captain 25 --substitute "Xin Wang" --seed 778
+    python3 cli/withdraw.py --withdrawn 33 --substitute "Sub Name" --seed 777
+    python3 cli/withdraw.py --withdrawn 17 --new-captain 25 --substitute "Sub Name" --seed 778
+
+For tournaments that forbid withdrawals after publication and fill seats
+straight from a waitlist, use cli/substitute.py instead (no redraw).
 """
 from __future__ import annotations
 
 import argparse
 import sys
-from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from core import io_utils
-from core.models import Event
-from core.replay import replay
+from cli._pre import add_common_args, commit, new_event, setup  # noqa: E402
+from core import io_utils  # noqa: E402
+from core.models import parse_seed  # noqa: E402
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="withdrawal redraw")
     ap.add_argument("--withdrawn", type=int, required=True, help="withdrawing player id")
     ap.add_argument("--substitute", required=True, help="substitute name (entered by user)")
-    ap.add_argument("--seed", type=int, required=True,
-                    help="random seed (entered by user, logged)")
+    ap.add_argument("--seed", type=parse_seed, required=True,
+                    help="random seed: an integer or any text (entered by user, logged)")
     ap.add_argument("--new-captain", type=int, default=None,
                     help="required when the withdrawing player is a captain: successor id")
-    ap.add_argument("--actor", default="organizer")
-    ap.add_argument("--date", default=None, help="snapshot date YYYYMMDD, default today")
-    ap.add_argument("--env", default=None,
-                    help="data environment under data/ (default: GS_ENV or prod)")
+    add_common_args(ap)
     args = ap.parse_args()
-    if args.env:
-        io_utils.set_env(args.env)
 
-
-    cfg = io_utils.load_config()
-    players = io_utils.load_players()
-    events = io_utils.read_events()
-    if not any(e.type in ("initial_draw", "assign_teams") for e in events):
+    cfg, players = setup(args)
+    if not any(e.type in ("initial_draw", "assign_teams") for e in io_utils.read_events()):
         raise SystemExit("no team assignment yet; run draw_teams.py or import_teams.py first")
 
     payload = {"withdrawn_id": args.withdrawn, "substitute_name": args.substitute}
     if args.new_captain is not None:
         payload["new_captain_id"] = args.new_captain
-    ev = Event(
-        seq=io_utils.next_seq(),
-        ts=datetime.now().isoformat(timespec="seconds"),
-        type="withdraw_redraw",
-        actor=args.actor,
-        payload=payload,
-        seed=args.seed,
-    )
-    io_utils.append_event(ev)
-
-    state = replay(players, io_utils.read_events(), cfg["players"]["num_teams"])
-    state.validate(cfg["players"]["females_per_team"], cfg["players"]["males_per_team"])
-
-    date_str = args.date or datetime.now().strftime("%Y%m%d")
-    out = io_utils.snapshot_path(date_str)
-    io_utils.export_teams_csv(state, out)
-
-    print(f"redraw complete seed={args.seed}, snapshot: {out}")
-    print("changes:")
-    for line in state.changelog[-18:]:
-        print("  " + line)
+    ev = new_event(args, "withdraw_redraw", payload, seed=args.seed)
+    commit(args, cfg, players, ev, f"redraw complete seed={args.seed}",
+           changelog_tail=2 * cfg["players"]["num_teams"] + 2)
 
 
 if __name__ == "__main__":

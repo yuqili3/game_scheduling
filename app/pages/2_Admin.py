@@ -39,7 +39,7 @@ from common import (  # noqa: E402
     team_label,
 )
 from core.draw import group_draw_assign  # noqa: E402
-from core.models import Event  # noqa: E402
+from core.models import Event, parse_seed  # noqa: E402
 
 st.set_page_config(page_title="Admin", page_icon="🗂️", layout="wide")
 st.title("🗂️ Admin Desk")
@@ -129,13 +129,19 @@ with tab_draw:
     st.caption("Enter a random seed (announce it out loud first). The 8 teams "
                "are shuffled into G1–G8 deterministically — same seed, same draw.")
     with st.form("group_draw"):
-        seed = st.number_input("Random seed", min_value=0, max_value=10**9, step=1)
+        seed_text = st.text_input("Random seed (a number or any text)")
         label = "Redraw groups" if md.group_of else "Draw groups"
         if st.form_submit_button(label):
-            groups = group_draw_assign(sorted(md.base.teams), int(seed))
-            if precheck_and_append("group_draw", {"groups": groups}, seed=int(seed)):
-                st.success(f"Drawn with seed {int(seed)}.")
-                st.rerun()
+            try:
+                seed = parse_seed(seed_text)
+            except ValueError as exc:
+                st.error(str(exc))
+                seed = None
+            if seed is not None:
+                groups = group_draw_assign(sorted(md.base.teams), seed)
+                if precheck_and_append("group_draw", {"groups": groups}, seed=seed):
+                    st.success(f"Drawn with seed {seed!r}.")
+                    st.rerun()
 
 with tab_lineups:
     if not md.group_of:

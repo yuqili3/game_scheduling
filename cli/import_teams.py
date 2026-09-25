@@ -2,41 +2,34 @@
 """Import an offline-published team assignment (e.g. the PDF roster):
 appends an assign_teams event.
 
-Reads players.csv at the repo root (columns: team_id,team_captain,name,role,gender),
-matches names against the initial roster, writes the event and exports a snapshot.
+Reads a roster CSV (columns: team_id, name, role[, team_captain, gender]),
+matches names against the initial player tables of the environment, writes
+the event and exports a snapshot. Works for any team composition; `role` is
+"captain" or "member" (no captains at all is fine).
 
 Usage:
-    python3 cli/import_teams.py [--roster players.csv] [--actor organizer] [--date 20260612]
+    python3 cli/import_teams.py [--roster players.csv] [--env xd2026] [--date 20260925] [--dry-run]
 """
 from __future__ import annotations
 
 import argparse
 import csv
 import sys
-from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from core import io_utils
-from core.models import Event
-from core.replay import replay
+from cli._pre import add_common_args, commit, new_event, setup  # noqa: E402
+from core import io_utils  # noqa: E402
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="import offline team assignment")
     ap.add_argument("--roster", default=str(io_utils.REPO_ROOT / "players.csv"))
-    ap.add_argument("--actor", default="organizer")
-    ap.add_argument("--date", default=None)
-    ap.add_argument("--env", default=None,
-                    help="data environment under data/ (default: GS_ENV or prod)")
+    add_common_args(ap)
     args = ap.parse_args()
-    if args.env:
-        io_utils.set_env(args.env)
 
-
-    cfg = io_utils.load_config()
-    players = io_utils.load_players()
+    cfg, players = setup(args)
     by_name = {p.name: p.id for p in players.values()}
     if len(by_name) != len(players):
         raise SystemExit("initial roster has duplicate names; cannot import by name")
@@ -50,28 +43,15 @@ def main() -> None:
             tid = int(row["team_id"])
             pid = by_name[name]
             # captain goes first
-            if row["role"].strip() == "captain":
+            if (row.get("role") or "").strip() == "captain":
                 teams.setdefault(tid, []).insert(0, pid)
             else:
                 teams.setdefault(tid, []).append(pid)
 
-    ev = Event(
-        seq=io_utils.next_seq(),
-        ts=datetime.now().isoformat(timespec="seconds"),
-        type="assign_teams",
-        actor=args.actor,
-        payload={"teams": {str(t): ms for t, ms in sorted(teams.items())}},
-        seed=None,
+    ev = new_event(
+        args, "assign_teams", {"teams": {str(t): ms for t, ms in sorted(teams.items())}}
     )
-    io_utils.append_event(ev)
-
-    state = replay(players, io_utils.read_events(), cfg["players"]["num_teams"])
-    state.validate(cfg["players"]["females_per_team"], cfg["players"]["males_per_team"])
-
-    date_str = args.date or datetime.now().strftime("%Y%m%d")
-    out = io_utils.snapshot_path(date_str)
-    io_utils.export_teams_csv(state, out)
-    print(f"import complete, {len(teams)} teams, snapshot: {out}")
+    commit(args, cfg, players, ev, f"import complete, {len(teams)} teams")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,48 @@
+# 2026 Fun Mixed-Doubles Friendly (《我们来打羽毛球-2026趣味混双友谊赛》)
+# Only the pre-match draw CLIs support this environment so far; the match-day
+# scheduler / Streamlit app still assume the 2026 melee format (see
+# spec_20260923.md section 4.2).
+
+event:
+  name: "2026 Fun Mixed Doubles Friendly"
+  date: "2026-10-17"          # Sat 8-10 PM
+  venue: "Redmond Badminton Club"
+  registration_opens: "2026-09-23T12:00"
+  change_deadline: "2026-09-25T12:00"
+  draw_date: "2026-09-25"     # teams drawn and published
+
+players:
+  num_female: 12              # ids 1-12  = female sign-up order (comment only; the CSVs are authoritative)
+  num_male: 12                # ids 13-24 = male sign-up order 1-12
+  num_teams: 6
+  team_composition:           # 6 teams x (1 appointed male captain + 1 M + 2 F)
+    - {gender: M, count: 1, role: captain}   # the 6 captains are pinned via fixed_team in players_male.csv
+    - {gender: M, count: 1}
+    - {gender: F, count: 2}
+  balance_by_level: true      # fill the `level` column in players*.csv (e.g. A/B/C)
+                              # to spread skill tiers evenly across teams; blank = ignored
+  assign_pairs: true          # draw the two mixed-doubles pairs per team as well (A1 = captain's pair)
+  withdrawals: waitlist_direct  # no withdrawals after publication; emergencies filled
+                                # from the waitlist in order -> cli/substitute.py
+
+format:                       # from the PDF; NOT yet consumed by the scheduler/app
+  kind: team_round_robin_xd
+  ties_per_team: 5            # single round robin among 6 teams
+  matches_per_tie: 2          # 2 x XD per tie, every player plays once (pairs A1/A2)
+  points_per_game: 15
+  games_per_match: 1
+  points_per_match_win: 1
+  ranking: [points, point_diff, points_for]
+  pair_order: seeded_random   # "2 matches, order randomly assigned by the system"
+
+courts:
+  total: 4
+  session_start: "20:00"
+  session_end: "22:00"
+  round_minutes: 10
+  phases:                     # PDF timetable: 5 rounds on 4 courts, then 5 rounds on 2 courts
+    - {rounds: 5, courts: 4}
+    - {rounds: 5, courts: 2}
+
+random:
+  default_seed: 20260925

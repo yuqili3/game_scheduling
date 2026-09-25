@@ -1,0 +1,13 @@
+id,name,gender,is_captain,level,fixed_team
+13,DreamWu,M,true,,1
+14,Michael Chou,M,true,,2
+15,Karl Zhang,M,false,,
+16,Yang Xiang,M,false,,
+17,Zack Chen,M,true,,3
+18,Yupeng Wang,M,false,,
+19,Yingtong Chen,M,true,,4
+20,Pei Lyu,M,false,,
+21,Guoquan Feng,M,true,,6
+22,Zhihao Hu,M,true,,5
+23,Yijun Qian,M,false,,
+24,Colin Zheng,M,false,,
