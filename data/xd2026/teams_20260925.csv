@@ -1,0 +1,25 @@
+id,name,gender,level,role,team_id,captain_name,pair
+13,DreamWu,M,,captain,1,DreamWu,A1
+15,Karl Zhang,M,,member,1,DreamWu,A2
+9,Yihang Guo,F,,member,1,DreamWu,A2
+3,(Sunny)Le Yang,F,,member,1,DreamWu,A1
+14,Michael Chou,M,,captain,2,Michael Chou,B1
+16,Yang Xiang,M,,member,2,Michael Chou,B2
+8,Sophie Tan,F,,member,2,Michael Chou,B1
+5,Qiannan Wang,F,,member,2,Michael Chou,B2
+17,Zack Chen,M,,captain,3,Zack Chen,C1
+24,Colin Zheng,M,,member,3,Zack Chen,C2
+7,Lily Liu,F,,member,3,Zack Chen,C2
+6,Yuqi Li,F,,member,3,Zack Chen,C1
+19,Yingtong Chen,M,,captain,4,Yingtong Chen,D1
+20,Pei Lyu,M,,member,4,Yingtong Chen,D2
+10,mia wu,F,,member,4,Yingtong Chen,D1
+4,Christie Taing,F,,member,4,Yingtong Chen,D2
+22,Zhihao Hu,M,,captain,5,Zhihao Hu,E1
+23,Yijun Qian,M,,member,5,Zhihao Hu,E2
+2,Xi s chen,F,,member,5,Zhihao Hu,E2
+12,Yuxin Han,F,,member,5,Zhihao Hu,E1
+21,Guoquan Feng,M,,captain,6,Guoquan Feng,F1
+18,Yupeng Wang,M,,member,6,Guoquan Feng,F2
+1,yini liu,F,,member,6,Guoquan Feng,F1
+11,Joyce Dai,F,,member,6,Guoquan Feng,F2
